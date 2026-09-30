@@ -76,16 +76,55 @@ subtitle-craft/
 
 ```mermaid
 flowchart TD
-    IN["輸入影音檔案<br/>(本機路徑或 Google Drive 連結)"] --> S0["Step 0: FFmpeg 音訊提取<br/>(16 kHz 單聲道 PCM WAV)"]
-    S0 --> S1["Stage 1: 全域音訊聽覺掃描與專有名詞提取<br/>(Vertex AI Gemini 3.8 Flash 1M Context Scan via GCS)"]
-    S1 --> GL["<basename>_glossary.md + Whisper 初始引導詞"]
-    S0 --> S2["Stage 2: 零漂移聲學語音轉錄<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]
+    classDef inputStyle fill:#2D3748,stroke:#4A5568,stroke-width:2px,color:#fff;
+    classDef stage1Style fill:#2B6CB0,stroke:#2C5282,stroke-width:2px,color:#fff;
+    classDef stage2Style fill:#319795,stroke:#285E61,stroke-width:2px,color:#fff;
+    classDef stage3Style fill:#6B46C1,stroke:#553C9A,stroke-width:2px,color:#fff;
+    classDef artifactStyle fill:#D69E2E,stroke:#B7791F,stroke-width:2px,color:#fff;
+    classDef outputStyle fill:#276749,stroke:#1C4532,stroke-width:2px,color:#fff;
+
+    subgraph Inputs["輸入媒體與參考上下文"]
+        IN["輸入影音檔案<br/>(本機路徑或 Google Drive 連結)"]:::inputStyle
+        REF["選用訪綱 / 錄音講稿<br/>(outline.md / script.md)"]:::inputStyle
+    end
+
+    subgraph Stage1["Stage 1: 全域音訊聽覺掃描與詞彙表"]
+        S0["FFmpeg 音訊提取<br/>(16 kHz 單聲道 WAV & 48 kbps MP3)"]:::stage1Style
+        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Context 全片音訊掃描)"]:::stage1Style
+        GL["中繼產物: <basename>_glossary.md<br/>+ Whisper 初始引導詞"]:::artifactStyle
+    end
+
+    subgraph Stage2["Stage 2: Whisper 聲學基準轉錄"]
+        S2["零漂移聲學語音轉錄<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+        WD["中繼產物: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
+    end
+
+    subgraph Stage3["Stage 3: 多模態音訊校對與時間重投影"]
+        S3_1["3.1 靜音感知分塊與多模態音訊校對<br/>(Vertex AI Gemini 3.8 Flash + GCS 音訊切片)"]:::stage3Style
+        S3_2["3.2 物理字詞邊界時間重投影與節奏淨化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
+        S3_3["3.3 8 維度串流品質審核<br/>(字數上限、閱讀語速 CPS、標點與重疊檢查)"]:::stage3Style
+    end
+
+    subgraph Deliverables["最終交付成果 (Deliverables)"]
+        OUT_SUB["交付成果: <basename>.srt & <basename>.vtt<br/>(影視級對齊雙格式字幕)"]:::outputStyle
+        OUT_REP["交付成果: <basename>_subtitle_report.md & .json<br/>(品質審核報告)"]:::outputStyle
+    end
+
+    IN --> S0
+    S0 --> S1
+    REF -.-> S1
+    S1 --> GL
+    S0 --> S2
     GL --> S2
-    S2 --> WD["<basename>_raw_whisper.srt + <basename>_words.json"]
-    WD --> S3["Stage 3: 靜音感知分塊與多模態音訊校對<br/>(Vertex AI Gemini 3.8 Flash + GCS 音訊切片)"]
-    GL --> S3
-    S3 --> RP["物理字詞邊界時間重投影與節奏淨化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]
-    RP --> OUT["最終產出物：<br/>• <basename>.srt & <basename>.vtt<br/>• <basename>_subtitle_report.md & .json"]
+    S2 --> WD
+    WD --> S3_1
+    GL --> S3_1
+    REF -.-> S3_1
+    S3_1 --> S3_2
+    WD --> S3_2
+    S3_2 --> S3_3
+    S3_3 --> OUT_SUB
+    S3_3 --> OUT_REP
 ```
 
 ---

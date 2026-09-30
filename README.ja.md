@@ -38,6 +38,63 @@ chmod +x setup.sh
 
 ---
 
+## 3 ステージ・ゴールデン字幕パイプラインアーキテクチャ
+
+```mermaid
+flowchart TD
+    classDef inputStyle fill:#2D3748,stroke:#4A5568,stroke-width:2px,color:#fff;
+    classDef stage1Style fill:#2B6CB0,stroke:#2C5282,stroke-width:2px,color:#fff;
+    classDef stage2Style fill:#319795,stroke:#285E61,stroke-width:2px,color:#fff;
+    classDef stage3Style fill:#6B46C1,stroke:#553C9A,stroke-width:2px,color:#fff;
+    classDef artifactStyle fill:#D69E2E,stroke:#B7791F,stroke-width:2px,color:#fff;
+    classDef outputStyle fill:#276749,stroke:#1C4532,stroke-width:2px,color:#fff;
+
+    subgraph Inputs["入力メディア＆参照コンテキスト"]
+        IN["入力動画 / 音声<br/>(ローカルファイルまたは Google Drive リンク)"]:::inputStyle
+        REF["任意アウトライン / 台本<br/>(outline.md / script.md)"]:::inputStyle
+    end
+
+    subgraph Stage1["Stage 1: グローバル音声解析＆用語集抽出"]
+        S0["FFmpeg 音声抽出<br/>(16 kHz モノラル WAV & 48 kbps MP3)"]:::stage1Style
+        S1["Vertex AI Gemini 3.8 Flash<br/>(1M コンテキスト全編音声スキャン)"]:::stage1Style
+        GL["中間アーティファクト: <basename>_glossary.md<br/>+ Whisper 初期プロンプト"]:::artifactStyle
+    end
+
+    subgraph Stage2["Stage 2: Whisper 音響グラウンドトゥルース"]
+        S2["ゼロドリフト音響文字起こし<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+        WD["中間アーティファクト: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
+    end
+
+    subgraph Stage3["Stage 3: マルチモーダル音声校正＆タイムスタンプ再投影"]
+        S3_1["3.1 無音認識チャンキング＆マルチモーダル校正<br/>(Vertex AI Gemini 3.8 Flash + GCS 音声スライス)"]:::stage3Style
+        S3_2["3.2 物理単語境界への再投影＆リズム最適化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
+        S3_3["3.3 8 次元ストリーミング品質監査<br/>(文字数上限、CPS、句読点、重複チェック)"]:::stage3Style
+    end
+
+    subgraph Deliverables["最終成果物 (Deliverables)"]
+        OUT_SUB["成果物: <basename>.srt & <basename>.vtt<br/>(放送・配信品質の字幕ファイル)"]:::outputStyle
+        OUT_REP["成果物: <basename>_subtitle_report.md & .json<br/>(品質監査レポート)"]:::outputStyle
+    end
+
+    IN --> S0
+    S0 --> S1
+    REF -.-> S1
+    S1 --> GL
+    S0 --> S2
+    GL --> S2
+    S2 --> WD
+    WD --> S3_1
+    GL --> S3_1
+    REF -.-> S3_1
+    S3_1 --> S3_2
+    WD --> S3_2
+    S3_2 --> S3_3
+    S3_3 --> OUT_SUB
+    S3_3 --> OUT_REP
+```
+
+---
+
 ## 利用シナリオと Agent プロンプト例 (User Scenarios & Agent Prompts)
 
 ### シナリオ 1：標準の YouTube・Netflix 字幕生成
@@ -67,7 +124,7 @@ chmod +x setup.sh
 
 ---
 
-## 3 ステージ・ゴールデン字幕パイプライン
+## 3 ステージ技術概要
 
 1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。
 2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース）**：`mlx-whisper` または `faster-whisper`（`word_timestamps=True`）でミリ秒単位の単語境界を抽出し、`<basename>_words.json` にキャッシュします。

@@ -38,6 +38,63 @@ chmod +x setup.sh
 
 ---
 
+## 3단계 골든 자막 파이프라인 아키텍처
+
+```mermaid
+flowchart TD
+    classDef inputStyle fill:#2D3748,stroke:#4A5568,stroke-width:2px,color:#fff;
+    classDef stage1Style fill:#2B6CB0,stroke:#2C5282,stroke-width:2px,color:#fff;
+    classDef stage2Style fill:#319795,stroke:#285E61,stroke-width:2px,color:#fff;
+    classDef stage3Style fill:#6B46C1,stroke:#553C9A,stroke-width:2px,color:#fff;
+    classDef artifactStyle fill:#D69E2E,stroke:#B7791F,stroke-width:2px,color:#fff;
+    classDef outputStyle fill:#276749,stroke:#1C4532,stroke-width:2px,color:#fff;
+
+    subgraph Inputs["입력 미디어 및 참고 컨텍스트"]
+        IN["입력 비디오 / 오디오<br/>(로컬 파일 또는 Google Drive 링크)"]:::inputStyle
+        REF["선택적 개요 / 대본<br/>(outline.md / script.md)"]:::inputStyle
+    end
+
+    subgraph Stage1["Stage 1: 글로벌 오디오 분석 및 용어집 추출"]
+        S0["FFmpeg 오디오 추출<br/>(16 kHz 모노 WAV & 48 kbps MP3)"]:::stage1Style
+        S1["Vertex AI Gemini 3.8 Flash<br/>(1M 컨텍스트 전체 오디오 스캔)"]:::stage1Style
+        GL["중간 아티팩트: <basename>_glossary.md<br/>+ Whisper 초기 프롬프트"]:::artifactStyle
+    end
+
+    subgraph Stage2["Stage 2: Whisper 음향 타임스탬프 추출"]
+        S2["제로 드리프트 음향 전사<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+        WD["중간 아티팩트: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
+    end
+
+    subgraph Stage3["Stage 3: 멀티모달 오디오 교정 및 타임스탬프 재투영"]
+        S3_1["3.1 무음 인식 청킹 및 멀티모달 교정<br/>(Vertex AI Gemini 3.8 Flash + GCS 오디오 슬라이스)"]:::stage3Style
+        S3_2["3.2 물리적 단어 경계 재투영 및 리듬 최적화<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
+        S3_3["3.3 8차원 스트리밍 품질 감사<br/>(글자 수 제한, CPS, 문장 부호, 겹침 검사)"]:::stage3Style
+    end
+
+    subgraph Deliverables["최종 산출물 (Deliverables)"]
+        OUT_SUB["산출물: <basename>.srt & <basename>.vtt<br/>(방송 및 스트리밍 정렬 자막)"]:::outputStyle
+        OUT_REP["산출물: <basename>_subtitle_report.md & .json<br/>(품질 감사 리포트)"]:::outputStyle
+    end
+
+    IN --> S0
+    S0 --> S1
+    REF -.-> S1
+    S1 --> GL
+    S0 --> S2
+    GL --> S2
+    S2 --> WD
+    WD --> S3_1
+    GL --> S3_1
+    REF -.-> S3_1
+    S3_1 --> S3_2
+    WD --> S3_2
+    S3_2 --> S3_3
+    S3_3 --> OUT_SUB
+    S3_3 --> OUT_REP
+```
+
+---
+
 ## 사용 시나리오 및 Agent 프롬프트 예시 (User Scenarios & Agent Prompts)
 
 ### 시나리오 1: 표준 YouTube 및 Netflix 자막 생성
@@ -67,7 +124,7 @@ chmod +x setup.sh
 
 ---
 
-## 3단계 골든 자막 파이프라인 아키텍처
+## 3단계 핵심 기술 개요
 
 1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출합니다.
 2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프)**: `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 밀리초 단위 단어 경계를 `<basename>_words.json`에 캐시합니다.

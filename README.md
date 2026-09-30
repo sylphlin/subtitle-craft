@@ -76,16 +76,55 @@ subtitle-craft/
 
 ```mermaid
 flowchart TD
-    IN["Input Video / Audio<br/>(Local File or Google Drive Link)"] --> S0["Step 0: FFmpeg Audio Extraction<br/>(16 kHz Mono PCM WAV)"]
-    S0 --> S1["Stage 1: Global Audio Context & Glossary<br/>(Vertex AI Gemini 3.8 Flash 1M Scan via GCS)"]
-    S1 --> GL["<basename>_glossary.md + Whisper Initial Prompt"]
-    S0 --> S2["Stage 2: Zero-Drift Acoustic Transcription<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]
+    classDef inputStyle fill:#2D3748,stroke:#4A5568,stroke-width:2px,color:#fff;
+    classDef stage1Style fill:#2B6CB0,stroke:#2C5282,stroke-width:2px,color:#fff;
+    classDef stage2Style fill:#319795,stroke:#285E61,stroke-width:2px,color:#fff;
+    classDef stage3Style fill:#6B46C1,stroke:#553C9A,stroke-width:2px,color:#fff;
+    classDef artifactStyle fill:#D69E2E,stroke:#B7791F,stroke-width:2px,color:#fff;
+    classDef outputStyle fill:#276749,stroke:#1C4532,stroke-width:2px,color:#fff;
+
+    subgraph Inputs["Input Media & Reference Context"]
+        IN["Input Video / Audio<br/>(Local File or Google Drive Link)"]:::inputStyle
+        REF["Optional Outline / Script<br/>(outline.md / script.md)"]:::inputStyle
+    end
+
+    subgraph Stage1["Stage 1: Global Audio Context & Glossary"]
+        S0["FFmpeg Audio Extraction<br/>(16 kHz Mono WAV & 48 kbps MP3)"]:::stage1Style
+        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Token Full-Audio Scan via GCS)"]:::stage1Style
+        GL["Artifact: <basename>_glossary.md<br/>+ Whisper Initial Prompt"]:::artifactStyle
+    end
+
+    subgraph Stage2["Stage 2: Whisper Acoustic Ground Truth"]
+        S2["Zero-Drift Acoustic Transcription<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+        WD["Artifact: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
+    end
+
+    subgraph Stage3["Stage 3: Multimodal Proofreading & Re-Projection"]
+        S3_1["3.1 Silence-Aware Chunked Proofreading<br/>(Vertex AI Gemini 3.8 Flash + GCS Audio Slices)"]:::stage3Style
+        S3_2["3.2 Physical Word-Boundary Re-Projection<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
+        S3_3["3.3 8-Dimension Streaming Quality Audit<br/>(CPS, Line Length, Punctuation, Overlaps)"]:::stage3Style
+    end
+
+    subgraph Deliverables["Final Deliverables"]
+        OUT_SUB["Deliverable: <basename>.srt & <basename>.vtt<br/>(Broadcast-Aligned Subtitle Tracks)"]:::outputStyle
+        OUT_REP["Deliverable: <basename>_subtitle_report.md & .json<br/>(Quality Audit Report)"]:::outputStyle
+    end
+
+    IN --> S0
+    S0 --> S1
+    REF -.-> S1
+    S1 --> GL
+    S0 --> S2
     GL --> S2
-    S2 --> WD["<basename>_raw_whisper.srt + <basename>_words.json"]
-    WD --> S3["Stage 3: Silence-Aware Chunked Multimodal Proofreading<br/>(Vertex AI Gemini 3.8 Flash + GCS Audio Slices)"]
-    GL --> S3
-    S3 --> RP["Physical Word-Boundary Reprojection & Rhythm Sanitizer<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]
-    RP --> OUT["Deliverables:<br/>• <basename>.srt & <basename>.vtt<br/>• <basename>_subtitle_report.md & .json"]
+    S2 --> WD
+    WD --> S3_1
+    GL --> S3_1
+    REF -.-> S3_1
+    S3_1 --> S3_2
+    WD --> S3_2
+    S3_2 --> S3_3
+    S3_3 --> OUT_SUB
+    S3_3 --> OUT_REP
 ```
 
 ---

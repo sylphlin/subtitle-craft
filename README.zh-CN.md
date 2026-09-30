@@ -38,6 +38,63 @@ chmod +x setup.sh
 
 ---
 
+## 三阶段黄金字幕管线架构
+
+```mermaid
+flowchart TD
+    classDef inputStyle fill:#2D3748,stroke:#4A5568,stroke-width:2px,color:#fff;
+    classDef stage1Style fill:#2B6CB0,stroke:#2C5282,stroke-width:2px,color:#fff;
+    classDef stage2Style fill:#319795,stroke:#285E61,stroke-width:2px,color:#fff;
+    classDef stage3Style fill:#6B46C1,stroke:#553C9A,stroke-width:2px,color:#fff;
+    classDef artifactStyle fill:#D69E2E,stroke:#B7791F,stroke-width:2px,color:#fff;
+    classDef outputStyle fill:#276749,stroke:#1C4532,stroke-width:2px,color:#fff;
+
+    subgraph Inputs["输入媒体与参考上下文"]
+        IN["输入音视频文件<br/>(本地路径或 Google Drive 链接)"]:::inputStyle
+        REF["可选提纲 / 录音文稿<br/>(outline.md / script.md)"]:::inputStyle
+    end
+
+    subgraph Stage1["Stage 1: 全局音频扫描与术语表"]
+        S0["FFmpeg 音频提取<br/>(16 kHz 单声道 WAV & 48 kbps MP3)"]:::stage1Style
+        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Context 全片音频扫描)"]:::stage1Style
+        GL["中间产物: <basename>_glossary.md<br/>+ Whisper 初始引导词"]:::artifactStyle
+    end
+
+    subgraph Stage2["Stage 2: Whisper 声学基准转录"]
+        S2["零漂移声学语音转录<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+        WD["中间产物: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
+    end
+
+    subgraph Stage3["Stage 3: 多模态音频校对与时间重投影"]
+        S3_1["3.1 静音感知分块与多模态音频校对<br/>(Vertex AI Gemini 3.8 Flash + GCS 音频切片)"]:::stage3Style
+        S3_2["3.2 物理词边界时间重投影与节奏净化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
+        S3_3["3.3 8 维度流媒体质量审核<br/>(单行字数、阅读语速 CPS、标点与重叠检查)"]:::stage3Style
+    end
+
+    subgraph Deliverables["最终交付成果 (Deliverables)"]
+        OUT_SUB["交付成果: <basename>.srt & <basename>.vtt<br/>(影视级对齐双格式字幕)"]:::outputStyle
+        OUT_REP["交付成果: <basename>_subtitle_report.md & .json<br/>(质量审核报告)"]:::outputStyle
+    end
+
+    IN --> S0
+    S0 --> S1
+    REF -.-> S1
+    S1 --> GL
+    S0 --> S2
+    GL --> S2
+    S2 --> WD
+    WD --> S3_1
+    GL --> S3_1
+    REF -.-> S3_1
+    S3_1 --> S3_2
+    WD --> S3_2
+    S3_2 --> S3_3
+    S3_3 --> OUT_SUB
+    S3_3 --> OUT_REP
+```
+
+---
+
 ## 使用场景与 Agent 指令示例 (User Scenarios & Agent Prompts)
 
 ### 场景 1：标准 YouTube 与 Netflix 影视级字幕生成
@@ -67,7 +124,7 @@ chmod +x setup.sh
 
 ---
 
-## 三阶段黄金字幕管线架构
+## 三阶段核心技术说明
 
 1. **Stage 1（Vertex AI 1M 全局术语表与 Whisper 初始提示词）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 `<145` 字符的 Whisper 引导词。
 2. **Stage 2（Whisper 毫秒级逐词时间戳）**：通过 `mlx-whisper` 或 `faster-whisper`（`word_timestamps=True`）提取物理词级时间戳并缓存至 `<basename>_words.json`。
