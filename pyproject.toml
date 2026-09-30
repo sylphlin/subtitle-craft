@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subtitle-craft"
+version = "1.0.0"
+description = "Broadcast-Grade YouTube & Netflix Subtitle Generator with Global Glossary, Whisper Word Timestamps, and Vertex AI Multimodal Audio Proofreading"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "sylphlin", email = "sylph.lin@gmail.com" }
+]
+keywords = [
+    "subtitle-craft",
+    "youtube-subtitles",
+    "netflix-subtitles",
+    "srt",
+    "vtt",
+    "whisper",
+    "mlx-whisper",
+    "faster-whisper",
+    "gemini",
+    "vertex-ai"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Video",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "google-genai>=0.1.1",
+    "google-cloud-storage>=3.0.0",
+    "google-auth>=2.0.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+mlx = [
+    "mlx-whisper>=0.4.0; sys_platform == 'darwin'"
+]
+whisper = [
+    "faster-whisper>=1.0.0"
+]
+all = [
+    "faster-whisper>=1.0.0",
+    "mlx-whisper>=0.4.0; sys_platform == 'darwin'",
+]
+dev = [
+    "pytest>=7.4.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/sylphlin/subtitle-craft"
+Repository = "https://github.com/sylphlin/subtitle-craft.git"
+
+[tool.setuptools]
+py-modules = ["subtitle_craft"]
+packages = ["scripts", "scripts.modules"]
+
+[project.scripts]
+subtitle-craft = "subtitle_craft:main"

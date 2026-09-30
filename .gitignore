@@ -1,0 +1,43 @@
+# Test files and generated outputs
+test/
+output/
+gdrive_inputs/
+
+# Raw media and subtitle output files in root/workspace
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wav
+*.m4a
+*.aac
+*.mp3
+*.webm
+*.srt
+*.vtt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Local session & runtime caches
+*.ses
+:memory:.ses
+.gcs_upload_cache.json
+.*_chunk_cache.json
