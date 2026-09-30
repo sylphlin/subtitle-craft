@@ -5,7 +5,10 @@ import sys
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "subtitle-craft", "scripts"),
+)
 from modules.gcp_client import (
     resolve_gcp_config,
     parse_gcs_uri,

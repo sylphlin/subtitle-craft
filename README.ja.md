@@ -19,8 +19,11 @@
 本プロジェクトは [Agent Plugins 1.0](https://agent-plugins.org/) に準拠し、**Google Cloud Vertex AI (ADC)** と **Cloud Storage (GCS)** 上で動作します（API キー管理不要）。
 
 ```bash
-# 1. グローバル Antigravity Plugin としてクローン
+# 1a. グローバル Antigravity Plugin としてクローン（推奨）
 git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
+
+# 1b. 旧来の単一 Skill ディレクトリへのインストール（任意：skills/subtitle-craft をシンボリックリンク）
+ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
 
 # 2. 依存パッケージのインストールと ADC 認証
 brew install ffmpeg
@@ -33,7 +36,7 @@ chmod +x setup.sh
 ```
 
 ### ディレクトリ構造（Agent Plugins 1.0 準拠）
-- **SSOT 実体ディレクトリ**：`skills/subtitle-craft/`（`SKILL.md`、`scripts/`、`assets/` を格納）を単一の信頼できる情報源とし、ルートの `SKILL.md`、`scripts`、`assets` は POSIX シンボリックリンクとして構成されています。
+- **SSOT 実体ディレクトリ**：`skills/subtitle-craft/`（`SKILL.md`、`scripts/`、`assets/` を格納）を単一の信頼できる情報源（Single Source of Truth）として構成しています。
 - **2 層 `AGENTS.md` 構成**：ルートの `AGENTS.md` は開発・エンジニアリング規約（Part I & Part II）を定義し、`rules/AGENTS.md` はプラグインに同梱される AI クライアント実行時ルール（`<PLUGIN_ROOT>` からの直接 CLI 実行、読み取り専用、Fail-Fast）を定義します。
 
 ---

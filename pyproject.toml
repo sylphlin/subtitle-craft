@@ -56,9 +56,11 @@ dev = [
 Homepage = "https://github.com/sylphlin/subtitle-craft"
 Repository = "https://github.com/sylphlin/subtitle-craft.git"
 
+[tool.setuptools.package-dir]
+"" = "skills/subtitle-craft"
+
 [tool.setuptools]
-py-modules = ["subtitle_craft"]
 packages = ["scripts", "scripts.modules"]
 
 [project.scripts]
-subtitle-craft = "subtitle_craft:main"
+subtitle-craft = "scripts.generate_subtitles:main"

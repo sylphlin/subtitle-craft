@@ -24,9 +24,11 @@
   ```bash
   git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
   ```
-- **全域 Skill**：
+- **舊式單一 Skill 安裝（`~/.gemini/config/skills/`）**：
+  將儲存庫內的 `skills/subtitle-craft` 子目錄連結至舊版 Skills 目錄：
   ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/skills/subtitle-craft
+  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
+  ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
   ```
 
 ### 2. 安裝相依套件與一鍵配置雲端環境 (`setup.sh`)
@@ -58,10 +60,6 @@ subtitle-craft/
 │       │   └── modules/                            # Vertex AI (llm_client)、GCS/Drive (gcp_client) 與進度條模組
 │       └── assets/                                 # 多語系字幕校對提示詞範本實體目錄 (SSOT)
 │           └── subtitle_proofread_template.*.md    # 支援 zh-TW, zh-CN, en, ja, ko 之 YouTube/Netflix 斷句規範
-├── SKILL.md -> skills/subtitle-craft/SKILL.md      # 根目錄 POSIX Symlink
-├── scripts -> skills/subtitle-craft/scripts        # 根目錄 POSIX Symlink（供 CLI 與測試直接引用）
-├── assets -> skills/subtitle-craft/assets          # 根目錄 POSIX Symlink
-├── subtitle_craft.py                               # 根目錄 CLI 執行入口
 ├── AGENTS.md                                       # 工作區與開發工程規範（Part I 執行守則 & Part II 開發規範）
 ├── setup.sh                                        # 原生 gcloud 雲端環境一鍵配置腳本
 ├── pyproject.toml                                  # Python 套件定義與 CLI 入口設定

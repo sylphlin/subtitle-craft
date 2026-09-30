@@ -100,9 +100,15 @@ def resolve_gcp_config(cli_project=None, cli_bucket=None, cli_location=None, cli
     region = cli_region or os.environ.get("GCP_REGION")
 
     # Scan .env files when any parameter is missing
+    _abs_file = os.path.abspath(__file__)
+    _parent_dirs = []
+    _cur = os.path.dirname(_abs_file)
+    for _ in range(5):
+        _parent_dirs.append(os.path.join(_cur, ".env"))
+        _cur = os.path.dirname(_cur)
     search_env_paths = [
         os.path.join(os.getcwd(), ".env"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
+        *_parent_dirs,
         os.path.expanduser("~/.gemini/.env"),
         os.path.expanduser("~/.config/gcloud/configurations/config_default"),
     ]

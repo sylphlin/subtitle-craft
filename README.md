@@ -24,9 +24,11 @@ This project complies with [Agent Plugins 1.0](https://agent-plugins.org/) and r
   ```bash
   git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
   ```
-- **Global Skill**:
+- **Legacy Single-Skill Installation (`~/.gemini/config/skills/`)**:
+  Link the inner `skills/subtitle-craft` directory into the legacy skills directory:
   ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/skills/subtitle-craft
+  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
+  ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
   ```
 
 ### 2. Install Dependencies and Provision Cloud Resources (`setup.sh`)
@@ -58,10 +60,6 @@ subtitle-craft/
 │       │   └── modules/                            # Vertex AI (llm_client), GCS/Drive (gcp_client), and progress modules
 │       └── assets/                                 # Canonical multi-locale prompt templates (SSOT)
 │           └── subtitle_proofread_template.*.md    # Language-specific YouTube/Netflix subtitle proofreading rules
-├── SKILL.md -> skills/subtitle-craft/SKILL.md      # Root POSIX symlink
-├── scripts -> skills/subtitle-craft/scripts        # Root POSIX symlink for CLI & test compatibility
-├── assets -> skills/subtitle-craft/assets          # Root POSIX symlink for prompt resolution
-├── subtitle_craft.py                               # Root CLI entrypoint
 ├── AGENTS.md                                       # Workspace & engineering development rules (Part I & Part II)
 ├── setup.sh                                        # Native gcloud setup script (GCS, Lifecycle, IAM, .env)
 ├── pyproject.toml                                  # Python package metadata and CLI entrypoint

@@ -30,7 +30,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 
 | Component | Path (`skills/subtitle-craft/`) | Function |
 | :--- | :--- | :--- |
-| **CLI Entrypoint** | `scripts/generate_subtitles.py` (or `subtitle_craft.py` at `<PLUGIN_ROOT>`) | Executes the 3-Stage Golden Subtitle Pipeline and 8-Dimension Quality Audit |
+| **CLI Entrypoint** | `scripts/generate_subtitles.py` | Executes the 3-Stage Golden Subtitle Pipeline and 8-Dimension Quality Audit |
 | **Vertex AI Client** | `scripts/modules/llm_client.py` | Vertex AI Gemini 3.8 Flash multimodal inference via ADC and GCS `gs://` URIs with HTTP 429 retry |
 | **GCP & Drive Client** | `scripts/modules/gcp_client.py` | GCS SHA-256 cached upload, ephemeral chunk cleanup, and 3-Tier Google Drive download |
 | **Progress Utility** | `scripts/modules/progress.py` | Live terminal spinner and elapsed timer |
@@ -64,7 +64,7 @@ Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKI
 Verify that FFmpeg, `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `./setup.sh --project YOUR_PROJECT_ID` or `gcloud auth application-default login`.
 
 ### Step 2: Execute the 3-Stage Subtitle Pipeline
-Set `Cwd` to `<PLUGIN_ROOT>` and run `generate_subtitles.py` (or `subtitle_craft.py`) directly via `run_command`:
+Set `Cwd` to `<PLUGIN_ROOT>` and run `skills/subtitle-craft/scripts/generate_subtitles.py` directly via `run_command`:
 
 ```bash
 # Standard Execution (Local Video/Audio or Google Drive Link):

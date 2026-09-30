@@ -7,13 +7,13 @@ This file defines the authoritative rules for AI Coding Agents (Google Antigravi
 ## Part I: Operational Invariants (When Executing Subtitle Craft Tasks)
 
 1. **Strict Toolset Execution Only (No Ad-Hoc Scripts)**:
-   - Execute all glossary extraction, Whisper acoustic transcription, multimodal subtitle proofreading, timestamp reprojection, and quality auditing exclusively via `skills/subtitle-craft/scripts/generate_subtitles.py` (symlinked at `scripts/generate_subtitles.py` and `subtitle_craft.py` at `<PLUGIN_ROOT>`).
+   - Execute all glossary extraction, Whisper acoustic transcription, multimodal subtitle proofreading, timestamp reprojection, and quality auditing exclusively via `skills/subtitle-craft/scripts/generate_subtitles.py`.
    - Writing temporary Python scripts or custom subtitle manipulation logic is **STRICTLY FORBIDDEN**.
 2. **Mandatory 3-Step Gated Workflow (Direct CLI Invocation)**:
    - Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft`).
    - Follow the 3-Step Runbook defined in [SKILL.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/SKILL.md):
      - **Step 1 (Environment & Cloud Auth Verification)**: Verify FFmpeg, `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`) from `<PLUGIN_ROOT>`.
-     - **Step 2 (Pipeline Execution)**: Run `python3 skills/subtitle-craft/scripts/generate_subtitles.py` (or `python3 subtitle_craft.py` with `Cwd` set to `<PLUGIN_ROOT>`) directly via `run_command`. Pass `--outline` or `--script` when the user provides an outline or reference script.
+     - **Step 2 (Pipeline Execution)**: Run `python3 skills/subtitle-craft/scripts/generate_subtitles.py` (with `Cwd` set to `<PLUGIN_ROOT>`) directly via `run_command`. Pass `--outline` or `--script` when the user provides an outline or reference script.
      - **Step 3 (Deliverable Verification)**: Verify that `.srt`, `.vtt`, `_glossary.md`, `_subtitle_report.md`, and `_subtitle_report.json` exist on disk and are non-empty (`> 0 bytes`).
 3. **Fail-Fast & Exit Gate Verification**:
    - If any script exits with a non-zero status (such as missing ADC credentials, 403/401 GCS/Vertex AI permission error, or missing FFmpeg), stop immediately, report the exact error and exit status, and instruct the user to run `./setup.sh --project YOUR_PROJECT_ID` or `gcloud auth application-default login`.
@@ -28,10 +28,9 @@ This file defines the authoritative rules for AI Coding Agents (Google Antigravi
 
 When modifying code, prompts, infrastructure scripts, or documentation in this repository, you MUST adhere to the following engineering standards:
 
-### 1. Single Source of Truth (SSOT) & Symlink Integrity (Agent Plugins 1.0 Specification)
+### 1. Single Source of Truth (SSOT) Directory Architecture (Agent Plugins 1.0 Specification)
 - **Canonical Code Location**: All core Python scripts (`scripts/*.py`), internal modules (`scripts/modules/*.py`), and prompt templates (`assets/*.md`) physically reside inside `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/` in compliance with the [Agent Plugins 1.0 Specification](https://agent-plugins.org/specification) (§4.2 & §7.1).
-- **Root Symlinks**: Top-level `SKILL.md`, `scripts`, and `assets` at the repository root are POSIX symlinks pointing to `skills/subtitle-craft/SKILL.md`, `skills/subtitle-craft/scripts`, and `skills/subtitle-craft/assets` (§4.1.3).
-- **Rule**: Always edit files under `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/`. Never replace root symlinks with duplicate physical directories.
+- **Rule**: Always edit files under `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/`. Do not create root-level symlinks or duplicate physical directories at the repository root.
 
 ### 2. Three-Stage Golden Subtitle Architecture & Acoustic Integrity
 - **Stage 1 (Vertex AI 1M Context Global Glossary)**: Extracts verified speaker names, brands, and domain terminology from the full recording on GCS and produces a language-matched Whisper `initial_prompt`.
