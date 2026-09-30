@@ -10,7 +10,7 @@
 
 ---
 
-**Subtitle Craft**는 로컬 또는 Google Drive의 비디오 및 오디오 파일에서 밀리초 단위로 정확하게 정렬되고 전문 용어가 통일된 자막(`.srt` 및 `.vtt`)을 생성합니다.
+**Subtitle Craft**는 로컬 또는 Google Drive의 비디오 및 오디오 파일에서 밀리초 단위로 정확하게 정렬되고 전문 용어가 통일된 자막(`.srt` 및 `.vtt`)을 생성합니다. Antigravity 채팅 창에서 자연어로 지시하면 자막 생성부터 품질 감사까지 전체 워크플로를 자동으로 수행합니다.
 
 ---
 
@@ -38,22 +38,40 @@ chmod +x setup.sh
 
 ---
 
-## 3단계 골든 자막 파이프라인 및 CLI 명령
+## 사용 시나리오 및 Agent 프롬프트 예시 (User Scenarios & Agent Prompts)
+
+### 시나리오 1: 표준 YouTube 및 Netflix 자막 생성
+- **사용 사례**: 비디오 또는 오디오 파일에서 밀리초 단위로 정렬된 `.srt` 및 `.vtt` 자막을 생성하고 동음이의어와 전문 용어를 교정합니다.
+- **Agent 프롬프트 예시**:
+  > *"`output/final_cut.mp4`의 한국어 YouTube 자막을 생성하고 전문 용어와 동음이의어를 교정해 줘."*
+- **산출물**:
+  1. `final_cut.srt` 및 `final_cut.vtt` (방송 및 스트리밍 호흡에 맞춘 자막 파일).
+  2. `final_cut_glossary.md` (검증된 전문 용어 및 화자 목록).
+  3. `final_cut_subtitle_report.md` 및 `final_cut_subtitle_report.json` (8차원 스트리밍 품질 감사 리포트).
+
+### 시나리오 2: 인터뷰 개요 또는 대본을 활용한 용어 고정 자막 생성
+- **사용 사례**: 출연자 이름, 브랜드 표기 또는 녹음 대본을 함께 제공하여 전체 영상의 용어 일관성을 100% 보장합니다.
+- **Agent 프롬프트 예시**:
+  > *"`outline.md`와 `script.md`를 용어 참고 자료로 사용하여 `interview.mp4`의 자막을 생성해 줘."*
+- **산출물**:
+  1. `interview.srt` 및 `interview.vtt` (개요 및 대본 용어가 반영된 자막).
+  2. `interview_glossary.md`, `interview_subtitle_report.md`, `interview_subtitle_report.json`.
+
+### 시나리오 3: Google Drive 공유 링크에서 직접 자막 생성
+- **사용 사례**: Google Drive 비디오 또는 오디오 링크를 직접 전달하여 원격 MD5 캐시 검증과 함께 자막을 생성합니다.
+- **Agent 프롬프트 예시**:
+  > *"이 Google Drive 영상 `https://drive.google.com/file/d/FILE_ID/view`의 한국어 자막과 품질 감사 리포트를 생성해 줘."*
+- **산출물**:
+  1. `<영상_이름>.srt` 및 `<영상_이름>.vtt`.
+  2. `<영상_이름>_glossary.md`, `<영상_이름>_subtitle_report.md`, `<영상_이름>_subtitle_report.json`.
+
+---
+
+## 3단계 골든 자막 파이프라인 아키텍처
 
 1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출합니다.
 2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프)**: `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 밀리초 단위 단어 경계를 `<basename>_words.json`에 캐시합니다.
 3. **Stage 3 (무음 인식 청킹 및 멀티모달 오디오 교정 + 8차원 스트리밍 품질 감사)**: 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하고 오디오 슬라이스 및 용어집을 기반으로 동음이의어를 교정한 뒤, 물리적 단어 경계로 타임스탬프를 재투영하고 `<basename>_subtitle_report.md` 및 `.json`을 생성합니다.
-
-```bash
-# 표준 자막 생성
-python3 subtitle_craft.py -i output/final_cut.mp4 --language ko
-
-# 인터뷰 개요 또는 대본을 함께 전달하여 용어 고정
-python3 subtitle_craft.py -i output/final_cut.mp4 --outline outline.md --script script.md --language ko
-
-# Google Drive 공유 링크에서 직접 자막 생성
-python3 subtitle_craft.py -i "https://drive.google.com/file/d/FILE_ID/view" --language ko
-```
 
 ---
 

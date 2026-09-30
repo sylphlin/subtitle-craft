@@ -10,7 +10,7 @@
 
 ---
 
-**Subtitle Craft** generates millisecond-accurate, terminology-verified subtitles (`.srt` and `.vtt`) from local or Google Drive video and audio files. Instruct the Antigravity Agent in natural language or run the CLI script directly.
+**Subtitle Craft** generates millisecond-accurate, terminology-verified subtitles (`.srt` and `.vtt`) from local or Google Drive video and audio files. Instruct the Antigravity Agent in natural language to execute the complete subtitle generation and quality audit workflow.
 
 ---
 
@@ -96,26 +96,26 @@ flowchart TD
 - **Use Case**: Generate millisecond-accurate `.srt` and `.vtt` subtitles with homophone and terminology proofreading.
 - **Agent Prompt**:
   > *"Generate YouTube subtitles for `output/final_cut.mp4` and proofread technical terms."*
-- **CLI Command**:
-  ```bash
-  python3 subtitle_craft.py -i output/final_cut.mp4 --language zh-TW
-  ```
+- **Deliverables**:
+  1. `final_cut.srt` and `final_cut.vtt` (Broadcast-aligned subtitle tracks).
+  2. `final_cut_glossary.md` (Verified domain terminology and speaker table).
+  3. `final_cut_subtitle_report.md` and `final_cut_subtitle_report.json` (8-dimension quality audit report).
 
 ### Scenario 2: Subtitles Anchored with an Interview Outline or Script
-- **Use Case**: Provide speaker names, brand spellings, or a recording script to guarantee 100% terminology consistency.
+- **Use Case**: Provide speaker names, brand spellings, or a recording script to guarantee 100% terminology consistency across the recording.
 - **Agent Prompt**:
-  > *"Generate subtitles for `interview.mp4` using `outline.md` as the terminology reference."*
-- **CLI Command**:
-  ```bash
-  python3 subtitle_craft.py -i interview.mp4 --outline outline.md --script script.md --language zh-TW
-  ```
+  > *"Generate subtitles for `interview.mp4` using `outline.md` and `script.md` as terminology references."*
+- **Deliverables**:
+  1. `interview.srt` and `interview.vtt` (Proofread against the provided outline and script).
+  2. `interview_glossary.md`, `interview_subtitle_report.md`, and `interview_subtitle_report.json`.
 
 ### Scenario 3: Direct Subtitle Generation from a Google Drive Link
-- **Use Case**: Download a video or audio file directly from Google Drive (with MD5 cache verification) and generate subtitles.
-- **CLI Command**:
-  ```bash
-  python3 subtitle_craft.py -i "https://drive.google.com/file/d/FILE_ID/view" --language en
-  ```
+- **Use Case**: Process a video or audio file directly from a Google Drive link with automatic MD5 cache verification.
+- **Agent Prompt**:
+  > *"Generate Traditional Chinese subtitles for `https://drive.google.com/file/d/FILE_ID/view`."*
+- **Deliverables**:
+  1. `<video_name>.srt` and `<video_name>.vtt`.
+  2. `<video_name>_glossary.md`, `<video_name>_subtitle_report.md`, and `<video_name>_subtitle_report.json`.
 
 ---
 

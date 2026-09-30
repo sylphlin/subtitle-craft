@@ -10,7 +10,7 @@
 
 ---
 
-**Subtitle Craft** は、ローカルまたは Google Drive 上の動画・音声ファイルから、ミリ秒単位で正確に同期し専門用語を統一した字幕（`.srt` および `.vtt`）を生成します。
+**Subtitle Craft** は、ローカルまたは Google Drive 上の動画・音声ファイルから、ミリ秒単位で正確に同期し専門用語を統一した字幕（`.srt` および `.vtt`）を生成します。Antigravity チャット画面で自然言語で指示するだけで、字幕生成から品質監査までを自動実行します。
 
 ---
 
@@ -38,22 +38,40 @@ chmod +x setup.sh
 
 ---
 
-## 3 ステージ・ゴールデン字幕パイプラインと CLI コマンド
+## 利用シナリオと Agent プロンプト例 (User Scenarios & Agent Prompts)
+
+### シナリオ 1：標準の YouTube・Netflix 字幕生成
+- **ユースケース**：動画・音声ファイルからミリ秒精度の `.srt` / `.vtt` 字幕を生成し、同音異義語や専門用語を校正します。
+- **Agent プロンプト例**：
+  > *「`output/final_cut.mp4` の日本語 YouTube 字幕を生成して、専門用語や同音異義語を校正して。」*
+- **生成される成果物**：
+  1. `final_cut.srt` および `final_cut.vtt`（放送・配信基準に準拠した字幕ファイル）。
+  2. `final_cut_glossary.md`（検証済み専門用語・話者一覧）。
+  3. `final_cut_subtitle_report.md` および `final_cut_subtitle_report.json`（8 次元品質監査レポート）。
+
+### シナリオ 2：インタビュー概要や台本を参照した用語固定字幕生成
+- **ユースケース**：人名リスト、ブランド表記、または台本を指定し、動画全体で用語の表記揺れをゼロにします。
+- **Agent プロンプト例**：
+  > *「`outline.md` と `script.md` を用語リファレンスとして使い、`interview.mp4` の字幕を生成して。」*
+- **生成される成果物**：
+  1. `interview.srt` および `interview.vtt`（台本・概要の用語に完全準拠した字幕）。
+  2. `interview_glossary.md`、`interview_subtitle_report.md`、`interview_subtitle_report.json`。
+
+### シナリオ 3：Google Drive 共有リンクからの直接字幕生成
+- **ユースケース**：Google Drive 上の動画・音声リンクを直接指定し、MD5 キャッシュ検証付きでダウンロードから字幕生成まで自動実行します。
+- **Agent プロンプト例**：
+  > *「この Google Drive 動画 `https://drive.google.com/file/d/FILE_ID/view` の日本語字幕と品質監査レポートを作成して。」*
+- **生成される成果物**：
+  1. `<動画名>.srt` および `<動画名>.vtt`。
+  2. `<動画名>_glossary.md`、`<動画名>_subtitle_report.md`、`<動画名>_subtitle_report.json`。
+
+---
+
+## 3 ステージ・ゴールデン字幕パイプライン
 
 1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。
 2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース）**：`mlx-whisper` または `faster-whisper`（`word_timestamps=True`）でミリ秒単位の単語境界を抽出し、`<basename>_words.json` にキャッシュします。
 3. **Stage 3（無音認識チャンキング＆マルチモーダル音声校正＋8 次元品質監査）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割し、音声スライスと用語集を照合して同音異義語を校正した後、単語境界へタイムスタンプを再投影して `<basename>_subtitle_report.md` と `.json` を出力します。
-
-```bash
-# 標準の字幕生成
-python3 subtitle_craft.py -i output/final_cut.mp4 --language ja
-
-# アウトラインや台本を指定して用語を固定
-python3 subtitle_craft.py -i output/final_cut.mp4 --outline outline.md --script script.md --language ja
-
-# Google Drive 共有リンクから直接生成
-python3 subtitle_craft.py -i "https://drive.google.com/file/d/FILE_ID/view" --language ja
-```
 
 ---
 

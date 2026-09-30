@@ -10,7 +10,7 @@
 
 ---
 
-**Subtitle Craft** 支援將本機或 Google Drive 影片與音訊檔案轉換為毫秒級精準對齊、專有名詞統一的 `.srt` 與 `.vtt` 字幕。可直接於 Antigravity 對話視窗以自然語言下達指令，或透過終端機 CLI 獨立執行。
+**Subtitle Craft** 支援將本機或 Google Drive 影片與音訊檔案轉換為毫秒級精準對齊、專有名詞統一的 `.srt` 與 `.vtt` 字幕。直接於 Antigravity 對話視窗以自然語言下達指令，即可由 Agent 自動完成全流程字幕產製與品質審核。
 
 ---
 
@@ -90,32 +90,40 @@ flowchart TD
 
 ---
 
-## 核心功能與 CLI 指令
+## 使用情境與 Agent 指令範例 (User Scenarios & Agent Prompts)
 
-### 1. 標準字幕生成（全自動三階段管線）
-結合 **Stage 1（Vertex AI 1M 全域詞彙表與 Whisper 初始引導詞）**、**Stage 2（Whisper 毫秒級逐字時間戳）** 與 **Stage 3（靜音感知分塊、多模態音訊校對與 8 維度串流品質審核）**：
+### 情境 1：標準 YouTube 與 Netflix 影視級字幕生成
+- **適用場景**：為影片或音訊自動生成毫秒級對齊的 `.srt` 與 `.vtt` 字幕，並校對同音字與技術專有名詞。
+- **Agent 指令範例**：
+  > *「幫我為 `output/final_cut.mp4` 產生繁體中文 YouTube 字幕，並校對技術專有名詞與同音字。」*
+- **交付成果**：
+  1. `final_cut.srt` 與 `final_cut.vtt`（符合串流閱讀節奏的雙格式字幕）。
+  2. `final_cut_glossary.md`（全片專有名詞與講者對照表）。
+  3. `final_cut_subtitle_report.md` 與 `final_cut_subtitle_report.json`（8 維度串流品質審核報告）。
 
-```bash
-python3 subtitle_craft.py -i output/final_cut.mp4 --language zh-TW
-```
+### 情境 2：結合訪綱或錄音講稿強化專有名詞一致性
+- **適用場景**：提供訪談大綱、人名清單或錄音文稿，確保全片人名、品牌與領域術語 100% 精準一致。
+- **Agent 指令範例**：
+  > *「請參考 `outline.md` 與 `script.md` 的專有名詞，幫 `interview.mp4` 產生並校對繁體中文字幕。」*
+- **交付成果**：
+  1. `interview.srt` 與 `interview.vtt`（依據訪綱與講稿完成術語鎖定之字幕）。
+  2. `interview_glossary.md`、`interview_subtitle_report.md` 與 `interview_subtitle_report.json`。
 
-### 2. 結合訪綱 (`--outline`) 或錄音講稿 (`--script`) 強化校對
-提供訪談大綱、人名清單或錄音原稿，確保全片專有名詞、外來語及同音字 100% 精準一致：
+### 情境 3：直接從 Google Drive 分享連結產生字幕
+- **適用場景**：直接傳入 Google Drive 影片或音訊連結，由 Agent 自動下載（支援遠端 MD5 快取驗證）並完成字幕產製。
+- **Agent 指令範例**：
+  > *「幫這個 Google Drive 影片 `https://drive.google.com/file/d/FILE_ID/view` 產生繁體中文雙格式字幕與品質審核報告。」*
+- **交付成果**：
+  1. `<影片名稱>.srt` 與 `<影片名稱>.vtt`。
+  2. `<影片名稱>_glossary.md`、`<影片名稱>_subtitle_report.md` 與 `<影片名稱>_subtitle_report.json`。
 
-```bash
-python3 subtitle_craft.py \
-  -i output/final_cut.mp4 \
-  --outline outline.md \
-  --script script.md \
-  --language zh-TW
-```
+---
 
-### 3. 直接輸入 Google Drive 分享連結
-支援直接傳入 Google Drive 檔案連結（自動驗證遠端 `md5Checksum` 並快取於本機）：
+## 三階段核心技術說明
 
-```bash
-python3 subtitle_craft.py -i "https://drive.google.com/file/d/FILE_ID/view" --language zh-TW
-```
+1. **Stage 1（全域音訊聽覺掃描與詞彙表提取）**：將全片音訊壓縮並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 3.8 Flash**（`1M` Context）產出 `<basename>_glossary.md` 與對應語系的 Whisper 初始引導詞（$\le 145$ 字元）。
+2. **Stage 2（Whisper 毫秒級逐字聲學時間戳）**：執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
+3. **Stage 3（靜音感知分塊、多模態音訊校對與 8 維度品質審核）**：於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字，將校對後的子句重投影回 Whisper 物理字詞邊界，並執行 8 維度 Netflix/YouTube 品質審核。
 
 ---
 

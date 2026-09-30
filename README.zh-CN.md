@@ -10,7 +10,7 @@
 
 ---
 
-**Subtitle Craft** 支持将本地或 Google Drive 视频与音频文件转换为毫秒级精准对齐、专有名词统一的 `.srt` 与 `.vtt` 字幕。可在 Antigravity 对话窗口使用自然语言下达指令，或通过终端 CLI 独立运行。
+**Subtitle Craft** 支持将本地或 Google Drive 视频与音频文件转换为毫秒级精准对齐、专有名词统一的 `.srt` 与 `.vtt` 字幕。直接在 Antigravity 对话窗口使用自然语言下达指令，即可由 Agent 自动完成全流程字幕生成与质量审核。
 
 ---
 
@@ -38,22 +38,40 @@ chmod +x setup.sh
 
 ---
 
-## 三阶段黄金字幕管线与 CLI 命令
+## 使用场景与 Agent 指令示例 (User Scenarios & Agent Prompts)
+
+### 场景 1：标准 YouTube 与 Netflix 影视级字幕生成
+- **适用场景**：为视频或音频生成毫秒级对齐的 `.srt` 与 `.vtt` 字幕，并自动校对同音字与技术术语。
+- **Agent 指令示例**：
+  > *“帮我为 `output/final_cut.mp4` 生成简体中文 YouTube 字幕，并校对专业术语与同音字。”*
+- **交付成果**：
+  1. `final_cut.srt` 与 `final_cut.vtt`（符合流媒体阅读节奏的双格式字幕）。
+  2. `final_cut_glossary.md`（全片专有名词与发言人对照表）。
+  3. `final_cut_subtitle_report.md` 与 `final_cut_subtitle_report.json`（8 维度流媒体质量审核报告）。
+
+### 场景 2：结合访谈提纲或文稿锁定专有名词
+- **适用场景**：提供访谈提纲、人名列表或录音文稿，确保全片人名、品牌与领域术语 100% 准确一致。
+- **Agent 指令示例**：
+  > *“请参考 `outline.md` 和 `script.md` 中的专有名词，为 `interview.mp4` 生成并校对中文字幕。”*
+- **交付成果**：
+  1. `interview.srt` 与 `interview.vtt`（依据提纲与文稿完成术语锁定的字幕）。
+  2. `interview_glossary.md`、`interview_subtitle_report.md` 与 `interview_subtitle_report.json`。
+
+### 场景 3：直接从 Google Drive 分享链接生成字幕
+- **适用场景**：直接提供 Google Drive 视频或音频链接，由 Agent 自动下载（支持远程 MD5 缓存校验）并生成字幕。
+- **Agent 指令示例**：
+  > *“帮这个 Google Drive 视频 `https://drive.google.com/file/d/FILE_ID/view` 生成中文字幕和质量审核报告。”*
+- **交付成果**：
+  1. `<视频名称>.srt` 与 `<视频名称>.vtt`。
+  2. `<视频名称>_glossary.md`、`<视频名称>_subtitle_report.md` 与 `<视频名称>_subtitle_report.json`。
+
+---
+
+## 三阶段黄金字幕管线架构
 
 1. **Stage 1（Vertex AI 1M 全局术语表与 Whisper 初始提示词）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 `<145` 字符的 Whisper 引导词。
 2. **Stage 2（Whisper 毫秒级逐词时间戳）**：通过 `mlx-whisper` 或 `faster-whisper`（`word_timestamps=True`）提取物理词级时间戳并缓存至 `<basename>_words.json`。
 3. **Stage 3（静音感知分块、多模态音频校对与 8 维度流媒体质量审核）**：在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表进行校对，将时间轴重投影回物理词边界，并生成 `<basename>_subtitle_report.md` 与 `.json`。
-
-```bash
-# 标准字幕生成
-python3 subtitle_craft.py -i output/final_cut.mp4 --language zh-CN
-
-# 结合访谈提纲或文稿校对
-python3 subtitle_craft.py -i output/final_cut.mp4 --outline outline.md --script script.md --language zh-CN
-
-# 直接输入 Google Drive 分享链接
-python3 subtitle_craft.py -i "https://drive.google.com/file/d/FILE_ID/view" --language zh-CN
-```
 
 ---
 
