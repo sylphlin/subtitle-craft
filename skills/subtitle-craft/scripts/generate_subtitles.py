@@ -15,7 +15,7 @@ Three-Stage Golden Pipeline:
            re-projects timestamps onto Whisper word boundaries, and runs an 8-dimension quality audit.
 
 Usage Examples:
-  # Standard YouTube Subtitle Generation
+  # Standard YouTube Subtitle Generation (outputs to <input_dir>/output/ by default)
   python3 scripts/generate_subtitles.py -i output/video.mp4
 
   # With User Interview Outline or Reference Script
@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import wave
 
 # Support internal modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +57,53 @@ except ImportError:
         delete_gcs_blob,
     )
     from scripts.modules.progress import LiveTicker
+
+
+def resolve_output_dir(input_path, cli_output_dir=None):
+    """
+    Resolve the output directory for subtitle deliverables.
+    When cli_output_dir is None, default to <input_dir>/output.
+    If <input_dir> is already named 'output', reuse <input_dir> directly.
+    """
+    if cli_output_dir:
+        return os.path.abspath(cli_output_dir)
+    input_dir = os.path.dirname(os.path.abspath(input_path)) or os.getcwd()
+    if os.path.basename(os.path.normpath(input_dir)).lower() == "output":
+        return input_dir
+    return os.path.join(input_dir, "output")
+
+
+def get_wav_duration_seconds(wav_path):
+    """Return the exact duration of a PCM WAV file in seconds."""
+    if not wav_path or not os.path.exists(wav_path):
+        return None
+    try:
+        with wave.open(wav_path, "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            if rate > 0:
+                return round(frames / float(rate), 3)
+    except Exception:
+        pass
+    return None
+
+
+def _abort_cloud_failure(stage_label, exc):
+    """Print a diagnostic error report to stderr and terminate with exit code 1."""
+    err_type = type(exc).__name__
+    sys.stderr.write(
+        "\n================================================================================\n"
+        f"[FATAL CLOUD ERROR] {stage_label} failed ({err_type})\n"
+        "================================================================================\n"
+        f"  • Exception : {exc}\n"
+        "  • Action Required:\n"
+        "    1. Verify Google Cloud ADC credentials: run `gcloud auth application-default login`\n"
+        "    2. Verify project and GCS bucket setup: run `./setup.sh --project YOUR_PROJECT_ID`\n"
+        "    3. Check Vertex AI API quota and network connectivity.\n"
+        "================================================================================\n"
+    )
+    sys.stderr.flush()
+    sys.exit(1)
 
 
 def format_timestamp_srt(seconds):
@@ -97,7 +145,7 @@ def extract_audio_16k_mono(input_media, output_wav):
             raise RuntimeError(f"FFmpeg audio extraction failed: {res.stderr}")
 
 
-def run_whisper_transcription(audio_wav, model_size="base", language="zh", device="auto", initial_prompt=None):
+def run_whisper_transcription(audio_wav, model_size="small", language="zh", device="auto", initial_prompt=None):
     """
     Run Whisper acoustic transcription with hardware acceleration:
       1. mlx-whisper (Apple Silicon Metal / Neural Engine)
@@ -458,43 +506,43 @@ def extract_global_glossary(audio_wav=None, segments=None, user_outline=None, us
 
     gcs_audio_uri = None
     tmp_audio_mp3 = None
-    if audio_wav and os.path.exists(audio_wav) and gcs_bucket:
-        try:
-            tmp_audio_mp3 = os.path.join(os.path.dirname(audio_wav), "global_glossary_audio.mp3")
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", audio_wav, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "48k", tmp_audio_mp3],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
-            )
-            gcs_audio_uri = upload_file_to_gcs_with_cache(
-                tmp_audio_mp3,
-                bucket_name=gcs_bucket,
-                gcs_prefix="raw",
-                project=project,
-                region=region or "us-central1",
-            )
-        except Exception as gcs_err:
-            print(f"  [Notice] GCS audio upload failed ({gcs_err}), falling back to text-only glossary scan.", file=sys.stderr)
-
     try:
-        with LiveTicker("Extracting Global Consistency Glossary via Vertex AI Gemini (1M context scan)"):
-            glossary_content = call_llm(
-                prompt=prompt,
-                model=model,
-                project=project,
-                location=location,
-                gcs_bucket=gcs_bucket,
-                region=region,
-                gcs_uri=gcs_audio_uri,
-                temperature=0.1,
-                max_tokens=4096,
-                thinking_budget=0,
-            )
-        duration = time.time() - t0
-        print(f"  ✓ Global Glossary extracted in {duration:.1f}s")
-        return glossary_content.strip()
-    except Exception as e:
-        print(f"  [Warning] Global glossary extraction failed ({e}). Continuing with standard proofreading.", file=sys.stderr)
-        return user_outline or user_script or ""
+        if audio_wav and os.path.exists(audio_wav) and gcs_bucket:
+            try:
+                tmp_audio_mp3 = os.path.join(os.path.dirname(audio_wav), "global_glossary_audio.mp3")
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", audio_wav, "-vn", "-ar", "16000", "-ac", "1", "-b:a", "48k", tmp_audio_mp3],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                )
+                gcs_audio_uri = upload_file_to_gcs_with_cache(
+                    tmp_audio_mp3,
+                    bucket_name=gcs_bucket,
+                    gcs_prefix="raw",
+                    project=project,
+                    region=region or "us-central1",
+                )
+            except Exception as gcs_err:
+                _abort_cloud_failure("Stage 1 GCS Audio Upload", gcs_err)
+
+        try:
+            with LiveTicker("Extracting Global Consistency Glossary via Vertex AI Gemini (1M context scan)"):
+                glossary_content = call_llm(
+                    prompt=prompt,
+                    model=model,
+                    project=project,
+                    location=location,
+                    gcs_bucket=gcs_bucket,
+                    region=region,
+                    gcs_uri=gcs_audio_uri,
+                    temperature=0.1,
+                    max_tokens=4096,
+                    thinking_budget=0,
+                )
+            duration = time.time() - t0
+            print(f"  ✓ Global Glossary extracted in {duration:.1f}s")
+            return glossary_content.strip()
+        except Exception as e:
+            _abort_cloud_failure("Stage 1 Global Glossary Extraction (Vertex AI)", e)
     finally:
         if cleanup_gcs and gcs_audio_uri:
             delete_gcs_blob(gcs_audio_uri, project=project)
@@ -719,12 +767,9 @@ def proofread_single_chunk(c_idx, num_chunks, chunk_slice, template, global_glos
 
         if "-->" in clean_chunk:
             return c_idx, clean_chunk, True
-        else:
-            return c_idx, chunk_text, False
-
-    except Exception as e:
-        print(f"  [Warning] Chunk {c_idx+1} proofreading error after retries: {e}. Keeping original.", file=sys.stderr)
-        return c_idx, chunk_text, False
+        raise RuntimeError(
+            f"Chunk {c_idx + 1}/{num_chunks} returned invalid SRT output without '-->' timestamps."
+        )
     finally:
         if chunk_mp3_path and os.path.exists(chunk_mp3_path):
             try:
@@ -847,9 +892,11 @@ def score_candidate(cand_str, clean_t):
     return 0.50 * coverage + 0.25 * density + first_bonus + last_bonus
 
 
-def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_video_start=False):
+def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_video_start=False, source_bounds=None):
     """
     Realign LLM-proofread subtitle lines to physical word boundaries from Whisper word timestamps.
+    Uses an elastic bidirectional character window, conservative fallback progression,
+    re-synchronization anchoring, and source bounding-box enclosure to prevent cascading drift.
     Returns: (realigned_srt, alignment_stats)
     """
     default_stats = {"total": 0, "locked": 0, "fallback": 0, "fallback_indices": []}
@@ -906,6 +953,19 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
     if not items:
         return proofread_srt, default_stats
 
+    if source_bounds and len(source_bounds) == 2:
+        bound_start = float(source_bounds[0])
+        bound_end = float(source_bounds[1])
+    else:
+        bound_start = min(
+            min((it["fallback_start"] for it in items), default=0.0),
+            char_timeline[0]["start"],
+        )
+        bound_end = max(
+            max((it["fallback_end"] for it in items), default=0.0),
+            char_timeline[-1]["end"],
+        )
+
     alignment_stats = {
         "total": len(items),
         "locked": 0,
@@ -914,6 +974,7 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
     }
 
     cur_char_idx = 0
+    min_allowed_start = 0
     realigned_items = []
 
     for idx, item in enumerate(items):
@@ -929,8 +990,12 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
         best_match = None
         best_score = -1.0
 
-        search_start = cur_char_idx
-        search_extent = min(total_chars, search_start + max(L * 2 + 25, 80))
+        # Elastic bidirectional search window with lookback tolerance
+        search_start = max(min_allowed_start, cur_char_idx - 15)
+        search_extent = min(total_chars, cur_char_idx + max(L * 2 + 25, 80))
+        if search_extent < search_start:
+            search_start = min(min_allowed_start, total_chars)
+            search_extent = total_chars
 
         for s_pos in range(search_start, search_extent):
             for cand_len in range(max(1, L - 4), min(total_chars - s_pos + 1, L + 10)):
@@ -948,13 +1013,20 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             m_start, m_end = best_match
             t_start = char_timeline[m_start]["start"]
             t_end = char_timeline[m_end]["end"]
+            # Re-synchronization anchor: snap cursor to matched character end
             cur_char_idx = m_end + 1
+            min_allowed_start = m_start + 1
+            is_locked = True
             alignment_stats["locked"] += 1
         else:
-            t_start = item.get("fallback_start", 0.0)
+            # Conservative fallback progression: advance by L chars without timestamp-skipping
+            t_start = item.get("fallback_start", bound_start)
             t_end = item.get("fallback_end", t_start + 2.0)
-            while cur_char_idx < total_chars and char_timeline[cur_char_idx]["end"] <= t_end:
-                cur_char_idx += 1
+            # Bounding box enclosure for merged or fallback lines
+            t_start = max(bound_start, min(t_start, bound_end))
+            t_end = min(bound_end, max(t_end, min(bound_end, t_start + 0.5)))
+            cur_char_idx = min(total_chars, cur_char_idx + L)
+            is_locked = False
             alignment_stats["fallback"] += 1
             alignment_stats["fallback_indices"].append(item.get("index", idx + 1))
 
@@ -965,6 +1037,8 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             t_start = target_start
         elif len(realigned_items) > 0:
             prev = realigned_items[-1]
+            if is_locked and not prev.get("locked", True) and prev["end"] > target_start:
+                prev["end"] = max(prev["start"] + 0.2, target_start)
             prev_dur = prev["end"] - prev["start"]
             if target_start >= prev["end"] + 0.02:
                 t_start = target_start
@@ -978,11 +1052,15 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
                 else:
                     t_start = max(prev["end"], target_start)
 
+        if t_end <= t_start:
+            t_end = min(bound_end, t_start + 0.5) if not is_locked else (t_start + 0.5)
+
         realigned_items.append({
             "index": item.get("index", idx + 1),
             "start": t_start,
             "end": t_end,
-            "text": raw_text
+            "text": raw_text,
+            "locked": is_locked,
         })
 
     out_blocks = []
@@ -996,7 +1074,8 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
 
 def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_duration=6.0,
                              post_tail_buffer=0.4, min_gap_threshold=0.2, language="zh-TW",
-                             max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42):
+                             max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42,
+                             media_duration=None):
     """
     Sanitize subtitle timings and pacing:
       1. Enforce monotonic forward alignment without overlaps.
@@ -1004,6 +1083,7 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
       3. Enforce min duration (>= 1.0s) and max duration (<= 6.0s) bounds.
       4. Bridge micro-gaps (< 0.2s) to prevent visual flicker.
       5. Split overlength clauses and anchor them to word timestamps.
+      6. Cap subtitle end times at media_duration + post_tail_buffer when media_duration is supplied.
     """
     norm_lang = normalize_language_tag(language)
     if norm_lang in ["zh-TW", "zh-CN", "ja"]:
@@ -1100,6 +1180,12 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
         if cur["end"] - cur["start"] > max_duration:
             cur["end"] = cur["start"] + max_duration
 
+    if media_duration is not None and float(media_duration) > 0:
+        max_allowed_out = float(media_duration) + post_tail_buffer
+        for cur in items:
+            if cur["end"] > max_allowed_out:
+                cur["end"] = max(cur["start"] + 0.2, max_allowed_out)
+
     out_blocks = []
     for idx, it in enumerate(items, start=1):
         s_str = format_timestamp_srt(it["start"])
@@ -1115,12 +1201,16 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
                            model="gemini-3.8-flash", chunk_size=80,
                            max_workers=5, language="zh-TW", all_words=None, cache_path=None,
                            project=None, location=None, gcs_bucket=None, region=None,
-                           max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42):
+                           max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42,
+                           media_duration=None):
     """
     Stage 3: Multimodal Audio-Text Parallel Chunked Proofreading with Global Glossary and Reference Script.
     Slices local audio chunks, stages them to GCS, proofreads subtitles via Vertex AI,
     and re-projects timestamps onto Whisper word boundaries.
     """
+    if media_duration is None and audio_wav and os.path.exists(audio_wav):
+        media_duration = get_wav_duration_seconds(audio_wav)
+
     template, tmpl_file = load_proofread_template(
         language=language,
         max_chars_cjk=max_chars_cjk,
@@ -1186,7 +1276,16 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
 
             completed_count = cached_count
             for future in concurrent.futures.as_completed(futures):
-                c_idx, clean_text, success = future.result()
+                try:
+                    c_idx, clean_text, success = future.result()
+                except Exception as e:
+                    failed_idx = futures[future]
+                    for pending_f in futures:
+                        pending_f.cancel()
+                    _abort_cloud_failure(
+                        f"Stage 3 Multimodal Chunk Proofreading (Chunk {failed_idx + 1}/{num_chunks})",
+                        e,
+                    )
                 results[c_idx] = clean_text
                 if success and cache_path:
                     c_slice = chunk_slices[c_idx]
@@ -1227,7 +1326,13 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
                 w for w in all_words
                 if (float(w.get("end", 0.0)) >= t_first - 2.0 and float(w.get("start", 0.0)) <= t_last + 2.0)
             ]
-            realigned_chunk, c_stats = realign_subtitles_to_words(c_text, chunk_words, language=language, is_video_start=(c_idx == 0))
+            realigned_chunk, c_stats = realign_subtitles_to_words(
+                c_text,
+                chunk_words,
+                language=language,
+                is_video_start=(c_idx == 0),
+                source_bounds=(t_first, t_last),
+            )
             overall_alignment_stats["total"] += c_stats["total"]
             overall_alignment_stats["locked"] += c_stats["locked"]
             overall_alignment_stats["fallback"] += c_stats["fallback"]
@@ -1239,15 +1344,18 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
     raw_combined = "\n\n".join(realigned_chunks).strip()
     sanitized_srt = sanitize_subtitle_timings(
         raw_combined, all_words=all_words, language=language,
-        max_chars_cjk=max_chars_cjk, max_chars_korean=max_chars_korean, max_chars_latin=max_chars_latin
+        max_chars_cjk=max_chars_cjk, max_chars_korean=max_chars_korean, max_chars_latin=max_chars_latin,
+        media_duration=media_duration,
     )
     return sanitized_srt, overall_alignment_stats
 
 
 def audit_subtitles_quality(srt_content, language="zh-TW", global_glossary=None, alignment_stats=None,
-                            max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42):
+                            max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42,
+                            media_duration=None):
     """
     Run an 8-dimension Netflix and YouTube Subtitle Quality, Pacing, and Acoustic Audit.
+    Includes a top-level machine-readable agent_verdict quality gate.
     Returns: (metrics_dict, console_summary_str, markdown_report_str)
     """
     norm_lang = normalize_language_tag(language)
@@ -1284,7 +1392,14 @@ def audit_subtitles_quality(srt_content, language="zh-TW", global_glossary=None,
 
     total_lines = len(items)
     if total_lines == 0:
-        return {}, "No subtitles found.", "# Subtitle Quality Report\nNo subtitles found."
+        empty_verdict = {
+            "pass_quality_gate": False,
+            "acoustic_lock_rate_pct": 0.0,
+            "last_out_vs_duration_diff_sec": 0.0,
+            "fatal_violations": ["EMPTY_SUBTITLES: No subtitle blocks found"],
+            "suggested_action": "ONE_SHOT_REMEDIATE",
+        }
+        return {"agent_verdict": empty_verdict}, "No subtitles found.", "# Subtitle Quality Report\nNo subtitles found."
 
     durs = [x["duration"] for x in items]
     mean_dur = sum(durs) / total_lines
@@ -1425,6 +1540,36 @@ def audit_subtitles_quality(srt_content, language="zh-TW", global_glossary=None,
     fallback_count = alignment_stats.get("fallback", 0) if alignment_stats else 0
     locked_pct = round((locked_count / max(1, locked_count + fallback_count)) * 100, 1)
 
+    last_out_sec = round(items[-1]["end"], 3)
+    if media_duration is not None and float(media_duration) > 0:
+        last_out_vs_duration_diff_sec = round(last_out_sec - float(media_duration), 3)
+    else:
+        last_out_vs_duration_diff_sec = 0.0
+
+    fatal_violations = []
+    if locked_pct < 80.0:
+        fatal_violations.append(
+            f"LOW_ACOUSTIC_LOCK_RATE: {locked_pct:.1f}% < 80.0% minimum threshold"
+        )
+    if media_duration is not None and float(media_duration) > 0 and last_out_vs_duration_diff_sec > 0.5:
+        fatal_violations.append(
+            f"LAST_OUT_EXCEEDS_DURATION: last_out ({last_out_sec:.3f}s) exceeds media_duration "
+            f"({float(media_duration):.3f}s) by +{last_out_vs_duration_diff_sec:.3f}s (max allowed +0.500s)"
+        )
+    if len(overlaps) > 0:
+        fatal_violations.append(
+            f"TIMELINE_OVERLAPS: {len(overlaps)} overlapping subtitle intervals detected"
+        )
+
+    pass_quality_gate = len(fatal_violations) == 0
+    agent_verdict = {
+        "pass_quality_gate": pass_quality_gate,
+        "acoustic_lock_rate_pct": locked_pct,
+        "last_out_vs_duration_diff_sec": last_out_vs_duration_diff_sec,
+        "fatal_violations": fatal_violations,
+        "suggested_action": "DELIVER" if pass_quality_gate else "ONE_SHOT_REMEDIATE",
+    }
+
     base_score = 100.0
     base_score -= min(20.0, len(overlaps) * 5.0)
     base_score -= min(10.0, len(micro_gaps) * 2.0)
@@ -1491,11 +1636,13 @@ def audit_subtitles_quality(srt_content, language="zh-TW", global_glossary=None,
     review_issues.sort(key=lambda it: it.get("severity", 0), reverse=True)
 
     metrics = {
+        "agent_verdict": agent_verdict,
         "language_locale": norm_lang,
         "total_subtitles": total_lines,
+        "media_duration_seconds": round(float(media_duration), 3) if media_duration else None,
         "first_in_seconds": round(items[0]["start"], 3),
         "first_in_timestamp": format_timestamp_srt(items[0]["start"]),
-        "last_out_seconds": round(items[-1]["end"], 3),
+        "last_out_seconds": last_out_sec,
         "last_out_timestamp": format_timestamp_srt(items[-1]["end"]),
         "mean_duration_seconds": round(mean_dur, 2),
         "median_duration_seconds": round(median_dur, 2),
@@ -1531,10 +1678,17 @@ def audit_subtitles_quality(srt_content, language="zh-TW", global_glossary=None,
         "actionable_issues_count": len(review_issues)
     }
 
+    verdict_status_str = "PASS (DELIVER)" if pass_quality_gate else f"FAIL ({agent_verdict['suggested_action']})"
     c_card = f"""
 ================================================================================
 YouTube / Netflix Subtitle Quality Audit Report
 ================================================================================
+[Agent Quality Gate Verdict]
+  • Quality Gate Status     : {verdict_status_str}
+  • Acoustic Lock Rate      : {locked_pct:.1f}% (Threshold: >= 80.0%)
+  • Last Out vs Duration    : {last_out_vs_duration_diff_sec:+.3f}s (Threshold: <= +0.500s)
+  • Fatal Violations        : {len(fatal_violations)}
+
 [Core Metrics]
   • Locale                  : {norm_lang}
   • Total Lines             : {total_lines:,}
@@ -1595,6 +1749,7 @@ YouTube / Netflix Subtitle Quality Audit Report
 
 > **Generated At**: {time.strftime('%Y-%m-%d %H:%M:%S')}  
 > **Locale**: `{norm_lang}`  
+> **Quality Gate Verdict**: **{verdict_status_str}**  
 > **Compliance Score**: **{compliance_score:.1f}% (Grade {grade})**  
 > **Acoustic Lock Rate**: **{locked_pct:.1f}%** ({locked_count}/{max(1, locked_count + fallback_count)} lines locked to word timestamps)
 
@@ -1604,6 +1759,7 @@ YouTube / Netflix Subtitle Quality Audit Report
 * **Total Subtitle Lines**: `{total_lines:,}`
 * **First In Timestamp**: `{metrics['first_in_timestamp']}`
 * **Last Out Timestamp**: `{metrics['last_out_timestamp']}`
+* **Last Out vs Media Duration**: `{last_out_vs_duration_diff_sec:+.3f}` s
 * **Mean Line Duration**: `{mean_dur:.2f}` s (Median `{median_dur:.2f}` s)
 * **Mean Reading Speed**: `{mean_cps}` CPS (Peak `{peak_cps}` CPS)
 
@@ -1625,7 +1781,7 @@ YouTube / Netflix Subtitle Quality Audit Report
 ## 3. Timing & Pacing
 | Check | Target Standard | Measured Value | Note |
 | :--- | :--- | :--- | :--- |
-| **Acoustic Lock Rate** | Word-boundary lock | `{locked_pct:.1f}%` ({locked_count} lines) | {'PASS' if fallback_count == 0 else f'WARN ({fallback_count} fallback lines)'} |
+| **Acoustic Lock Rate** | Word-boundary lock ($\\ge 80.0\\%$) | `{locked_pct:.1f}%` ({locked_count} lines) | {'PASS' if locked_pct >= 80.0 else f'FAIL ({fallback_count} fallback lines)'} |
 | **Min Duration** | $\\ge 1.0\\text{{s}}$ | `{100.0 - metrics['duration_under_1s_rate_pct']:.1f}%` ({total_lines - len(short_dur)} lines) | Padded into available silence |
 | **Max Duration** | $\\le 6.0\\text{{s}}$ | `100.0%` (0 stuck lines) | Capped at 6.0s |
 | **Timeline Overlaps** | $0\\text{{s}}$ | `{len(overlaps)}` overlaps | Monotonic non-overlapping |
@@ -1664,11 +1820,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument("-i", "--input", required=True, help="Path or Google Drive URL to input video or audio file")
-    parser.add_argument("-o", "--output-dir", default=None, help="Output directory for SRT/VTT subtitles (default: same as input)")
+    parser.add_argument("-o", "--output-dir", default=None, help="Output directory for SRT/VTT subtitles (default: <input_dir>/output)")
     parser.add_argument("--outline", default=None, help="User interview outline, topic summary, or glossary notes to bias terminology")
     parser.add_argument("--script", default=None, help="Path to full recording script, manuscript, or spoken draft to anchor terminology")
-    parser.add_argument("--whisper-model", default="base", choices=["tiny", "base", "small", "medium", "large-v3"],
-                        help="Whisper model size for Stage 2 acoustic transcription (default: base)")
+    parser.add_argument("--whisper-model", default="small", choices=["tiny", "base", "small", "medium", "large-v3"],
+                        help="Whisper model size for Stage 2 acoustic transcription (default: small)")
     parser.add_argument("--model", default="gemini-3.8-flash",
                         help="Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (default: gemini-3.8-flash)")
     parser.add_argument("--project", default=None,
@@ -1688,6 +1844,8 @@ def main():
     parser.add_argument("--workers", type=int, default=5, help="Concurrent workers for parallel proofreading (default: 5)")
     parser.add_argument("--force", action="store_true", help="Force re-running Whisper transcription and Gemini proofreading")
     parser.add_argument("--force-glossary", action="store_true", help="Force re-extracting global glossary from scratch")
+    parser.add_argument("--strict", action="store_true",
+                        help="Exit with code 2 if agent_verdict.pass_quality_gate is False")
     parser.add_argument("--max-chars-cjk", type=int, default=15,
                         help="Maximum characters per line for CJK (zh-TW, zh-CN, ja) (default: 15)")
     parser.add_argument("--max-chars-korean", type=int, default=16,
@@ -1712,7 +1870,7 @@ def main():
         sys.exit(1)
 
     if is_gdrive_source(args.input):
-        out_dir = args.output_dir or "."
+        out_dir = os.path.abspath(args.output_dir) if args.output_dir else os.path.abspath("output")
         os.makedirs(out_dir, exist_ok=True)
         try:
             args.input = download_gdrive_file_with_cache(
@@ -1727,10 +1885,11 @@ def main():
     elif not os.path.exists(args.input):
         print(f"[Error] Input media not found: {args.input}", file=sys.stderr)
         sys.exit(1)
+    else:
+        out_dir = resolve_output_dir(args.input, args.output_dir)
+        os.makedirs(out_dir, exist_ok=True)
 
     input_basename = os.path.splitext(os.path.basename(args.input))[0]
-    out_dir = args.output_dir or os.path.dirname(os.path.abspath(args.input)) or "."
-    os.makedirs(out_dir, exist_ok=True)
 
     final_srt_path = os.path.join(out_dir, f"{input_basename}.srt")
     final_vtt_path = os.path.join(out_dir, f"{input_basename}.vtt")
@@ -1753,6 +1912,7 @@ def main():
     print("Subtitle Craft (Global Glossary + Whisper ASR + Vertex AI Audio Proofreading)")
     print("=" * 78)
     print(f"  • Input Media   : {args.input}")
+    print(f"  • Output Dir    : {out_dir}")
     print(f"  • LLM Model     : {args.model}")
     print(f"  • Active Backend: Google Cloud Vertex AI (Project: {gcp_cfg.get('project')}, Location: {gcp_cfg.get('location')})")
     print(f"  • GCS Storage   : gs://{gcp_cfg.get('bucket')}/raw/ (Region: {gcp_cfg.get('region')}, 2-day Lifecycle)")
@@ -1770,6 +1930,7 @@ def main():
         tmp_wav = os.path.join(tmpdir, "audio_16k.wav")
         print("\n[Step 0] Extracting 16kHz mono audio from media...")
         extract_audio_16k_mono(args.input, tmp_wav)
+        media_duration = get_wav_duration_seconds(tmp_wav)
 
         # Stage 1: Global Audio Context & Consistency Glossary Extraction
         global_glossary = None
@@ -1879,6 +2040,7 @@ def main():
             max_chars_cjk=args.max_chars_cjk,
             max_chars_korean=args.max_chars_korean,
             max_chars_latin=args.max_chars_latin,
+            media_duration=media_duration,
         )
 
         with open(final_srt_path, "w", encoding="utf-8") as f:
@@ -1897,7 +2059,8 @@ def main():
             alignment_stats=alignment_stats,
             max_chars_cjk=args.max_chars_cjk,
             max_chars_korean=args.max_chars_korean,
-            max_chars_latin=args.max_chars_latin
+            max_chars_latin=args.max_chars_latin,
+            media_duration=media_duration,
         )
 
         with open(report_json_path, "w", encoding="utf-8") as f:
@@ -1909,6 +2072,16 @@ def main():
         print(f"[Output 4/4] Saved Subtitle Audit Markdown Report: {report_md_path}")
 
         print(c_card)
+
+        verdict = metrics.get("agent_verdict", {})
+        if args.strict and not verdict.get("pass_quality_gate", False):
+            sys.stderr.write(
+                f"\n[Strict Quality Gate Failed] pass_quality_gate=False | "
+                f"suggested_action={verdict.get('suggested_action')} | "
+                f"violations={verdict.get('fatal_violations')}\n"
+            )
+            sys.stderr.flush()
+            sys.exit(2)
 
     print("=" * 78)
     print("Subtitle Generation & Quality Audit Completed Successfully!")

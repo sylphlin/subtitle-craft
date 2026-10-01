@@ -127,11 +127,12 @@ flowchart TD
 
 ---
 
-## 3 ステージ技術概要
+## 3 ステージ技術概要 (v2.0 アーキテクチャ)
 
-1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。
-2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース）**：`mlx-whisper` または `faster-whisper`（`word_timestamps=True`）でミリ秒単位の単語境界を抽出し、`<basename>_words.json` にキャッシュします。
-3. **Stage 3（無音認識チャンキング＆マルチモーダル音声校正＋8 次元品質監査）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割し、音声スライスと用語集を照合して同音異義語を校正した後、単語境界へタイムスタンプを再投影して `<basename>_subtitle_report.md` と `.json` を出力します。
+- **出力ディレクトリの自動分離（`<input_dir>/output/`）**：`-o` / `--output-dir` 未指定時は、すべての成果物およびキャッシュファイルを `<input_dir>/output/` に出力します（入力元がすでに `output/` の場合はネストせずそのまま再利用します）。
+1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出 — 厳格な Fail-Fast）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。クラウドエラー発生時は即座に終了コード `1` で停止します。
+2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース — デフォルト `small` モデル）**：`--whisper-model small` をデフォルトとして `mlx-whisper` または `faster-whisper`（`word_timestamps=True`）を実行し、高精度な単語境界を `<basename>_words.json` にキャッシュします。
+3. **Stage 3（無音認識チャンキング、非カスケード再投影＆`agent_verdict` 品質ゲート）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割して同音異義語を校正した後、双方向弾性ウィンドウ（`cur_char_idx - 15`）、保守的フォールバック進行（`+ L` 文字）、再同期アンカー、および `source_bounds` 境界制限によって連鎖的なタイムスタンプずれを防止します（発話終了後の $+0.4\text{s}$ 読み取りバッファを維持しつつ `media_duration + 0.4s` で上限保護）。`<basename>_subtitle_report.json` の最上位に `agent_verdict`（`--strict` 指定時は失敗時に終了コード `2`、最大 1 回の自動修復リトライ）を出力します。
 
 ---
 

@@ -127,11 +127,12 @@ flowchart TD
 
 ---
 
-## 三阶段核心技术说明
+## 三阶段核心技术说明 (v2.0 架构升级)
 
-1. **Stage 1（Vertex AI 1M 全局术语表与 Whisper 初始提示词）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 `<145` 字符的 Whisper 引导词。
-2. **Stage 2（Whisper 毫秒级逐词时间戳）**：通过 `mlx-whisper` 或 `faster-whisper`（`word_timestamps=True`）提取物理词级时间戳并缓存至 `<basename>_words.json`。
-3. **Stage 3（静音感知分块、多模态音频校对与 8 维度流媒体质量审核）**：在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表进行校对，将时间轴重投影回物理词边界，并生成 `<basename>_subtitle_report.md` 与 `.json`。
+- **输出目录自动隔离（`<input_dir>/output/`）**：未指定 `-o` / `--output-dir` 时，默认将所有最终与中间产物保存在 `<input_dir>/output/` 子目录中（若输入文件已位于 `output/` 目录则直接复用，避免嵌套 `output/output/`）。
+1. **Stage 1（Vertex AI 1M 全局术语表与 Whisper 初始提示词 — 严格 Fail-Fast）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 $\le 145$ 字符的 Whisper 引导词；遇到云端异常立即以退出码 `1` 终止并输出修复指引。
+2. **Stage 2（Whisper 毫秒级逐词时间戳 — 默认 `small` 模型）**：默认采用 `--whisper-model small` 运行 `mlx-whisper` 或 `faster-whisper`（`word_timestamps=True`），提取高精度物理词级时间戳并缓存至 `<basename>_words.json`。
+3. **Stage 3（静音感知分块、防级联漂移重投影与 `agent_verdict` 质量门禁）**：在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表进行校对；通过双向弹性字符窗口（`cur_char_idx - 15` 回溯）、保守回退推进（`+ L` 字符）、重同步锚点与 `source_bounds` 边界约束消除级联时间漂移，保留语音结束后的 $+0.4\text{s}$ 阅读缓冲（上限 `media_duration + 0.4s`），并在 `<basename>_subtitle_report.json` 顶层输出 `agent_verdict` 质量门禁（支持 `--strict` 退出码 `2` 与最多 1 次自动修复重试）。
 
 ---
 

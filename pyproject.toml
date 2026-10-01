@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "subtitle-craft"
-version = "1.0.0"
+version = "2.0.0"
 description = "Broadcast-Grade YouTube & Netflix Subtitle Generator with Global Glossary, Whisper Word Timestamps, and Vertex AI Multimodal Audio Proofreading"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -156,21 +156,25 @@ flowchart TD
 
 ---
 
-## Detailed Pipeline Stages
+## Detailed Pipeline Stages (v2.0 Architecture)
 
-### Stage 1: Global Audio Context & Consistency Glossary
+### Output Directory Isolation (`<input_dir>/output/`)
+- When `-o` / `--output-dir` is omitted, all final and intermediate deliverables (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) are saved inside `<input_dir>/output/`. If `<input_dir>` is already named `output`, the directory is reused directly without nested `output/output/` creation.
+
+### Stage 1: Global Audio Context & Consistency Glossary (Strict Fail-Fast)
 - Compresses the full episode audio to 48 kbps mono MP3, stages it to `gs://subtitle-craft-${PROJECT_ID}/raw/`, and scans the full recording with **Vertex AI Gemini 3.8 Flash** (`1M` token context).
 - Produces `<basename>_glossary.md` and extracts a compact Whisper `initial_prompt` ($\le 145$ characters) tailored to the target language (`zh-TW`, `zh-CN`, `en`, `ja`, `ko`).
+- Enforces strict fail-fast behavior: any GCS upload or Vertex AI error terminates immediately with exit code `1` and prints remediation steps.
 
-### Stage 2: Whisper Word-Level Acoustic Ground Truth
-- Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core CPU) with `word_timestamps=True`.
-- Saves `<basename>_raw_whisper.srt` and `<basename>_words.json` so subsequent proofreading runs reuse the cached acoustic baseline.
+### Stage 2: Whisper Word-Level Acoustic Ground Truth (`--whisper-model small`)
+- Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core CPU) with `--whisper-model small` by default and `word_timestamps=True`.
+- Saves `<basename>_raw_whisper.srt` and `<basename>_words.json` inside `<OUTPUT_DIR>` so subsequent proofreading runs reuse the cached acoustic baseline.
 
-### Stage 3: Silence-Aware Multimodal Proofreading & Acoustic Re-Projection
+### Stage 3: Silence-Aware Multimodal Proofreading, Non-Cascading Re-Projection & `agent_verdict` Audit
 1. **Silence-Aware Semantic Chunking**: Splits SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$) to prevent mid-sentence cuts across chunk boundaries.
-2. **Multimodal Audio-Text Proofreading**: Slices the corresponding audio segment for each chunk, stages it to `gs://<bucket>/raw/audio_chunks/`, proofreads against both the audio waveform and the Global Glossary, and deletes the remote chunk in a `finally` block.
-3. **Physical Word-Boundary Re-Projection**: Maps proofread subtitle lines back onto Whisper's physical word-level character timeline (`realign_subtitles_to_words`) and applies broadcast rhythm sanitization (`180 ms` lead-in pre-roll, $+0.4\text{s}$ post-tail reading buffer, $<0.2\text{s}$ micro-gap bridging, $1.0\text{s}\text{–}6.0\text{s}$ duration bounds).
-4. **8-Dimension Streaming Quality Audit**: Evaluates line length (`CJK <= 15`, `ko <= 16`, `Latin <= 42`), reading speed (CPS), trailing punctuation, bracket closure, Markdown cleanliness, acoustic lock rate, timing overlaps/micro-gaps, and prolonged silences ($\ge 10\text{s}$).
+2. **Multimodal Audio-Text Proofreading (Strict Fail-Fast)**: Slices the corresponding audio segment for each chunk, stages it to `gs://<bucket>/raw/audio_chunks/`, proofreads against both the audio waveform and the Global Glossary, and deletes the remote chunk in a `finally` block. Any unrecoverable chunk failure cancels pending workers and exits with code `1`.
+3. **Resilient Non-Cascading Word-Boundary Re-Projection**: Maps proofread subtitle lines back onto Whisper's physical word-level character timeline (`realign_subtitles_to_words`) using an elastic bidirectional character window (`cur_char_idx - 15` lookback), conservative fallback progression (`+ L` characters), re-synchronization anchoring (`cur_char_idx = m_end + 1`), and `source_bounds` enclosure. Applies broadcast rhythm sanitization (`180 ms` lead-in pre-roll, $+0.4\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging, $1.0\text{s}\text{–}6.0\text{s}$ duration bounds).
+4. **8-Dimension Streaming Quality Audit & `agent_verdict` Gate**: Evaluates line length (`CJK <= 15`, `ko <= 16`, `Latin <= 42`), reading speed (CPS), trailing punctuation, bracket closure, Markdown cleanliness, acoustic lock rate ($\ge 80.0\%$), timing overlaps/micro-gaps, and prolonged silences ($\ge 10\text{s}$). Writes a top-level `agent_verdict` object (`pass_quality_gate`, `acoustic_lock_rate_pct`, `last_out_vs_duration_diff_sec <= 0.5s`, `fatal_violations`, `suggested_action`) to `<basename>_subtitle_report.json`. When `--strict` is passed, exits with code `2` if `pass_quality_gate` is `false` to trigger at most one automated self-healing retry (`--whisper-model small --force`).
 
 ---
 

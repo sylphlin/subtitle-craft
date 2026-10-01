@@ -127,11 +127,12 @@ flowchart TD
 
 ---
 
-## 3단계 핵심 기술 개요
+## 3단계 핵심 기술 개요 (v2.0 아키텍처)
 
-1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출합니다.
-2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프)**: `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 밀리초 단위 단어 경계를 `<basename>_words.json`에 캐시합니다.
-3. **Stage 3 (무음 인식 청킹 및 멀티모달 오디오 교정 + 8차원 스트리밍 품질 감사)**: 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하고 오디오 슬라이스 및 용어집을 기반으로 동음이의어를 교정한 뒤, 물리적 단어 경계로 타임스탬프를 재투영하고 `<basename>_subtitle_report.md` 및 `.json`을 생성합니다.
+- **출력 디렉터리 자동 분리 (`<input_dir>/output/`)**: `-o` / `--output-dir`를 지정하지 않으면 모든 산출물과 캐시 파일을 `<input_dir>/output/` 하위 폴더에 저장합니다(입력 경로가 이미 `output/`인 경우 중첩 없이 그대로 재사용합니다).
+1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트 — 엄격한 Fail-Fast)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출하며, 클라우드 오류 발생 시 즉시 종료 코드 `1`로 중단합니다.
+2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프 — 기본값 `small` 모델)**: 기본 `--whisper-model small` 설정으로 `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 고정밀 단어 경계를 `<basename>_words.json`에 캐시합니다.
+3. **Stage 3 (무음 인식 청킹, 비연쇄 재투영 및 `agent_verdict` 품질 게이트)**: 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하여 동음이의어를 교정한 뒤, 양방향 탄성 탐색 윈도우(`cur_char_idx - 15`), 보수적 폴백 진행(`+ L` 글자), 재동기화 앵커 및 `source_bounds` 경계 제한을 통해 연쇄적인 타임스탬프 밀림 현상을 방지합니다(발화 종료 후 $+0.4\text{s}$ 읽기 버퍼를 유지하면서 `media_duration + 0.4s`로 상한 보호). `<basename>_subtitle_report.json` 최상위에 `agent_verdict`(`--strict` 사용 시 품질 미달이면 종료 코드 `2` 반환, 최대 1회 자동 복구 재시도)를 기록합니다.
 
 ---
 

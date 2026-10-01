@@ -156,11 +156,15 @@ flowchart TD
 
 ---
 
-## 三階段核心技術說明
+## 三階段核心技術說明 (v2.0 架構升級)
 
-1. **Stage 1（全域音訊聽覺掃描與詞彙表提取）**：將全片音訊壓縮並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 3.8 Flash**（`1M` Context）產出 `<basename>_glossary.md` 與對應語系的 Whisper 初始引導詞（$\le 145$ 字元）。
-2. **Stage 2（Whisper 毫秒級逐字聲學時間戳）**：執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
-3. **Stage 3（靜音感知分塊、多模態音訊校對與 8 維度品質審核）**：於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字，將校對後的子句重投影回 Whisper 物理字詞邊界，並執行 8 維度 Netflix/YouTube 品質審核。
+- **輸出目錄自動隔離（`<input_dir>/output/`）**：未指定 `-o` / `--output-dir` 時，系統預設將所有最終與中繼產物（`.srt`、`.vtt`、`_glossary.md`、`_raw_whisper.srt`、`_words.json`、`_subtitle_report.md`、`_subtitle_report.json`）收納於 `<input_dir>/output/` 子目錄；若輸入檔案已位於 `output/` 目錄下則直接重用，避免產生 `output/output/` 巢狀結構。
+1. **Stage 1（全域音訊聽覺掃描與詞彙表提取 — 嚴格 Fail-Fast）**：將全片音訊壓縮並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 3.8 Flash**（`1M` Context）產出 `<basename>_glossary.md` 與對應語系的 Whisper 初始引導詞（$\le 145$ 字元）。若發生雲端權限或連線錯誤，立即以狀態碼 `1` 終止並輸出診斷步驟，絕不靜默降級。
+2. **Stage 2（Whisper 毫秒級逐字聲學時間戳 — 預設 `small` 模型）**：預設採用 `--whisper-model small` 執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取高精準度物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
+3. **Stage 3（靜音感知分塊、非連鎖防漂移聲學重投影與 `agent_verdict` 品質閘門）**：
+   - 於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字（雲端錯誤立即取消佇列並以狀態碼 `1` 終止）。
+   - **非連鎖防漂移重投影（`realign_subtitles_to_words`）**：採用雙向彈性字元搜尋視窗（`cur_char_idx - 15` 回溯容錯）、保守退避推進（`+ L` 字元）、重同步錨點（`cur_char_idx = m_end + 1`）與 `source_bounds` 邊界夾制，確保單行退避絕不引發後續字幕連鎖時間漂移；並於語音結束後保留 $+0.4\text{s}$ 閱讀尾韻緩衝（上限鎖定於 `media_duration + 0.4s`）。
+   - **8 維度串流品質審核與 `agent_verdict` 機器可讀閘門**：於 `<basename>_subtitle_report.json` 頂層寫入 `agent_verdict`（檢核 `acoustic_lock_rate_pct >= 80.0%`、`last_out_vs_duration_diff_sec <= 0.5s` 與零重疊）。搭配 `--strict` 參數時，若未通過品質閘門將回傳退出碼 `2`，支援 AI Agent 執行最多 1 次自動重試修復（`--whisper-model small --force`）。
 
 ---
 

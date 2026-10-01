@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "subtitle-craft",
-  "version": "1.0.0",
-  "description": "Broadcast-grade YouTube & Netflix subtitle generator (SRT & VTT). Executes a 3-stage pipeline: Vertex AI Gemini 3.8 Flash 1M context global glossary extraction, Whisper word-level acoustic ground truth (Apple Silicon MLX / faster-whisper), silence-aware chunked multimodal audio proofreading via Google Cloud Vertex AI (ADC) + GCS, physical word-boundary timestamp reprojection, rhythm sanitization, and 8-dimension streaming quality audit.",
+  "version": "2.0.0",
+  "description": "Broadcast-grade YouTube & Netflix subtitle generator (SRT & VTT). Executes a 3-stage pipeline: Vertex AI Gemini 3.8 Flash 1M context global glossary extraction, Whisper word-level acoustic ground truth (Apple Silicon MLX / faster-whisper, default model: small), silence-aware chunked multimodal audio proofreading via Google Cloud Vertex AI (ADC) + GCS, resilient non-cascading word-boundary timestamp reprojection, rhythm sanitization, and 8-dimension streaming quality audit with machine-readable agent_verdict quality gate.",
   "author": {
     "name": "sylphlin",
     "url": "https://github.com/sylphlin"

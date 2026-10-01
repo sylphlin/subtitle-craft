@@ -40,19 +40,20 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 
 ## Core Technical Principles
 
-1. **Stage 1 — Global Audio Context & Consistency Glossary (Vertex AI 1M Context Scan)**:
+1. **Stage 1 — Global Audio Context & Consistency Glossary (Vertex AI 1M Context Scan, Strict Fail-Fast)**:
    - Compresses the full episode audio to 48 kbps mono MP3, stages it to `gs://subtitle-craft-${PROJECT_ID}/raw/`, and scans the entire recording with **Gemini 3.8 Flash** to build `<BASENAME>_glossary.md` and a compact Whisper `initial_prompt` ($\le 145$ chars).
-   - Optionally merges user-provided outlines (`--outline`) and reference manuscripts (`--script`).
-2. **Stage 2 — Zero-Drift Acoustic Ground Truth (`word_timestamps=True`)**:
-   - Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core vectorization) biased with the Stage 1 `initial_prompt`.
-   - Caches raw segments (`<BASENAME>_raw_whisper.srt`) and word-level timestamps (`<BASENAME>_words.json`) so subsequent proofreading re-runs skip ASR.
-3. **Stage 3 — Silence-Aware Multimodal Proofreading & Acoustic Re-Projection**:
-   - Splits raw SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$), slices the corresponding audio chunks, stages them to `gs://<BUCKET>/raw/audio_chunks/`, and proofreads homophones, terminology, and clause boundaries in parallel.
+   - Optionally merges user-provided outlines (`--outline`) and reference manuscripts (`--script`). Terminates immediately with exit code `1` if GCS staging or Vertex AI inference fails.
+2. **Stage 2 — Zero-Drift Acoustic Ground Truth (`word_timestamps=True`, Default Model: `small`)**:
+   - Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core vectorization) with `--whisper-model small` by default, biased with the Stage 1 `initial_prompt`.
+   - Caches raw segments (`<BASENAME>_raw_whisper.srt`) and word-level timestamps (`<BASENAME>_words.json`) in `<OUTPUT_DIR>` (`<input_dir>/output/` by default) so subsequent proofreading re-runs skip ASR.
+3. **Stage 3 — Silence-Aware Multimodal Proofreading & Resilient Non-Cascading Acoustic Re-Projection**:
+   - Splits raw SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$), slices the corresponding audio chunks, stages them to `gs://<BUCKET>/raw/audio_chunks/`, and proofreads homophones, terminology, and clause boundaries in parallel (canceling pending futures and exiting with code `1` on any cloud failure).
    - Deletes remote audio chunks in `finally` blocks immediately after each chunk finishes.
-   - Re-projects proofread subtitle lines onto Whisper's physical word-level character timeline (`realign_subtitles_to_words`) and applies broadcast rhythm sanitization (`sanitize_subtitle_timings`: 180 ms lead-in pre-roll, $+0.4\text{s}$ post-tail reading buffer, $<0.2\text{s}$ micro-gap bridging, $1.0\text{s}\text{–}6.0\text{s}$ duration guards).
-4. **8-Dimension Netflix & YouTube Streaming Quality Audit**:
-   - Evaluates line length limits (`zh-TW`/`zh-CN`/`ja` $\le 15$, `ko` $\le 16$, `en` $\le 42$), reading speed (CPS), trailing punctuation cleanliness, bracket closure, Markdown residue, acoustic lock rate, timing overlaps/micro-gaps, prolonged silences ($\ge 10\text{s}$), and glossary coverage.
-   - Outputs `<BASENAME>_subtitle_report.md` and `<BASENAME>_subtitle_report.json`.
+   - Re-projects proofread subtitle lines onto Whisper's physical word-level character timeline (`realign_subtitles_to_words`) using an **elastic bidirectional search window** (`cur_char_idx - 15` lookback), **conservative fallback progression** (`+ L` chars without timestamp-skipping), **re-synchronization anchoring** (`cur_char_idx = m_end + 1`), and **`source_bounds` enclosure** so a single mismatched line never cascades to subsequent subtitles.
+   - Applies broadcast rhythm sanitization (`sanitize_subtitle_timings`: 180 ms lead-in pre-roll, $+0.4\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging, $1.0\text{s}\text{–}6.0\text{s}$ duration guards).
+4. **8-Dimension Netflix & YouTube Streaming Quality Audit + `agent_verdict` Quality Gate**:
+   - Evaluates line length limits (`zh-TW`/`zh-CN`/`ja` $\le 15$, `ko` $\le 16$, `en` $\le 42$), reading speed (CPS), trailing punctuation cleanliness, bracket closure, Markdown residue, acoustic lock rate ($\ge 80.0\%$), timing overlaps/micro-gaps, prolonged silences ($\ge 10\text{s}$), and glossary coverage.
+   - Outputs `<BASENAME>_subtitle_report.md` and `<BASENAME>_subtitle_report.json` containing the top-level `agent_verdict` object (`pass_quality_gate`, `acoustic_lock_rate_pct`, `last_out_vs_duration_diff_sec`, `fatal_violations`, `suggested_action`).
 
 ---
 
@@ -64,26 +65,31 @@ Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKI
 Verify that FFmpeg, `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `./setup.sh --project YOUR_PROJECT_ID` or `gcloud auth application-default login`.
 
 ### Step 2: Execute the 3-Stage Subtitle Pipeline
-Set `Cwd` to `<PLUGIN_ROOT>` and run `skills/subtitle-craft/scripts/generate_subtitles.py` directly via `run_command`:
+Set `Cwd` to `<PLUGIN_ROOT>` and run `skills/subtitle-craft/scripts/generate_subtitles.py` directly via `run_command` (when `-o` is omitted, all outputs are automatically isolated in `<input_dir>/output/`):
 
 ```bash
 # Standard Execution (Local Video/Audio or Google Drive Link):
 python3 skills/subtitle-craft/scripts/generate_subtitles.py \
   -i <INPUT_VIDEO_OR_AUDIO_OR_GDRIVE_URL> \
-  --language <auto|zh-TW|zh-CN|en|ja|ko>
+  --language <auto|zh-TW|zh-CN|en|ja|ko> \
+  --strict
 
 # With Optional Interview Outline or Recording Script:
 python3 skills/subtitle-craft/scripts/generate_subtitles.py \
   -i <INPUT_VIDEO_OR_AUDIO_OR_GDRIVE_URL> \
   --language <auto|zh-TW|zh-CN|en|ja|ko> \
   --outline "<OUTLINE_TEXT_OR_FILE>" \
-  --script "<SCRIPT_TEXT_OR_FILE>"
+  --script "<SCRIPT_TEXT_OR_FILE>" \
+  --strict
 ```
 
-### Step 3: Deliverable Exit Gate Verification
-Before declaring completion, verify that all 6 deliverable files exist in `<OUTPUT_DIR>` and are non-empty (`> 0 bytes`):
-1. `<BASENAME>.srt` (Final broadcast-ready SubRip subtitles)
-2. `<BASENAME>.vtt` (Final WebVTT subtitles)
-3. `<BASENAME>_glossary.md` (Stage 1 Global Terminology Glossary)
-4. `<BASENAME>_raw_whisper.srt` & `<BASENAME>_words.json` (Stage 2 Whisper acoustic ground truth)
-5. `<BASENAME>_subtitle_report.md` & `<BASENAME>_subtitle_report.json` (8-Dimension Quality Audit Report)
+### Step 3: Deliverable Exit Gate & One-Shot Self-Healing Verification
+1. Verify that all deliverable files exist in `<OUTPUT_DIR>` (`<input_dir>/output/` by default) and are non-empty (`> 0 bytes`):
+   - `<BASENAME>.srt` (Final broadcast-ready SubRip subtitles)
+   - `<BASENAME>.vtt` (Final WebVTT subtitles)
+   - `<BASENAME>_glossary.md` (Stage 1 Global Terminology Glossary)
+   - `<BASENAME>_raw_whisper.srt` & `<BASENAME>_words.json` (Stage 2 Whisper acoustic ground truth)
+   - `<BASENAME>_subtitle_report.md` & `<BASENAME>_subtitle_report.json` (8-Dimension Quality Audit Report)
+2. Inspect `agent_verdict` in `<BASENAME>_subtitle_report.json`:
+   - **`pass_quality_gate: true` (`suggested_action: "DELIVER"`)**: Present the audit metrics and deliverable file paths to the user.
+   - **`pass_quality_gate: false` (`suggested_action: "ONE_SHOT_REMEDIATE"` / Exit Code `2`)**: Execute **at most ONE** automated self-healing retry with `--whisper-model small --force`. If the second run still fails the quality gate, stop immediately and report `[Degraded]` along with `fatal_violations` and the actionable review table to the user.
