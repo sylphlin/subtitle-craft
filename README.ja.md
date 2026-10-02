@@ -98,29 +98,51 @@ flowchart TD
 
 ---
 
-## 利用シナリオと Agent プロンプト例 (User Scenarios & Agent Prompts)
+## Antigravity の操作方法と利用シナリオ (Usage & Scenarios)
+
+Antigravity では以下の 2 つの方法で実行できます：
+1. **ショートカット指定（`/skill` + `@ファイル`）**：`/subtitle-craft` を選択し、`@` で動画・音声や台本を指定するだけで実行できます。
+2. **自然言語プロンプト**：通常の会話文で要望を伝え、`@` ファイルやクラウドリンクを添付すると自動的にプラグインが呼び出されます。
 
 ### シナリオ 1：標準の YouTube・Netflix 字幕生成
 - **ユースケース**：動画・音声ファイルからミリ秒精度の `.srt` / `.vtt` 字幕を生成し、同音異義語や専門用語を校正します。
-- **Agent プロンプト例**：
-  > *「`output/final_cut.mp4` の日本語 YouTube 字幕を生成して、専門用語や同音異義語を校正して。」*
-- **生成される成果物**：
+- **方法 A（`/ + @` ショートカット指定）**：
+  ```text
+  /subtitle-craft ファイル: @final_cut.mp4
+  ```
+- **方法 B（自然言語プロンプト）**：
+  ```text
+  @final_cut.mp4 の日本語 YouTube 字幕を生成して、専門用語や同音異義語を校正して。
+  ```
+- **生成される成果物**（自動的に `<入力フォルダ>/output/` へ保存）：
   1. `final_cut.srt` および `final_cut.vtt`（放送・配信基準に準拠した字幕ファイル）。
   2. `final_cut_glossary.md`（検証済み専門用語・話者一覧）。
   3. `final_cut_subtitle_report.md` および `final_cut_subtitle_report.json`（8 次元品質監査レポート）。
 
 ### シナリオ 2：インタビュー概要や台本を参照した用語固定字幕生成
 - **ユースケース**：人名リスト、ブランド表記、または台本を指定し、動画全体で用語の表記揺れをゼロにします。
-- **Agent プロンプト例**：
-  > *「`outline.md` と `script.md` を用語リファレンスとして使い、`interview.mp4` の字幕を生成して。」*
+- **方法 A（`/ + @` ショートカット指定）**：
+  ```text
+  /subtitle-craft ファイル: @interview.mp4, 概要: @outline.md, 台本: @script.md
+  ```
+- **方法 B（自然言語プロンプト）**：
+  ```text
+  @outline.md と @script.md を用語リファレンスとして使い、@interview.mp4 の字幕を生成して。
+  ```
 - **生成される成果物**：
   1. `interview.srt` および `interview.vtt`（台本・概要の用語に完全準拠した字幕）。
   2. `interview_glossary.md`、`interview_subtitle_report.md`、`interview_subtitle_report.json`。
 
 ### シナリオ 3：Google Drive 共有リンクからの直接字幕生成
 - **ユースケース**：Google Drive 上の動画・音声リンクを直接指定し、MD5 キャッシュ検証付きでダウンロードから字幕生成まで自動実行します。
-- **Agent プロンプト例**：
-  > *「この Google Drive 動画 `https://drive.google.com/file/d/FILE_ID/view` の日本語字幕と品質監査レポートを作成して。」*
+- **方法 A（`/ + @` ショートカット指定）**：
+  ```text
+  /subtitle-craft URL: https://drive.google.com/file/d/FILE_ID/view, 言語: 日本語
+  ```
+- **方法 B（自然言語プロンプト）**：
+  ```text
+  この Google Drive 動画 https://drive.google.com/file/d/FILE_ID/view の日本語字幕と品質監査レポートを作成して。
+  ```
 - **生成される成果物**：
   1. `<動画名>.srt` および `<動画名>.vtt`。
   2. `<動画名>_glossary.md`、`<動画名>_subtitle_report.md`、`<動画名>_subtitle_report.json`。
@@ -129,10 +151,10 @@ flowchart TD
 
 ## 3 ステージ技術概要 (v2.0 アーキテクチャ)
 
-- **出力ディレクトリの自動分離（`<input_dir>/output/`）**：`-o` / `--output-dir` 未指定時は、すべての成果物およびキャッシュファイルを `<input_dir>/output/` に出力します（入力元がすでに `output/` の場合はネストせずそのまま再利用します）。
+- **出力ディレクトリの自動分離（`<input_dir>/output/`）**：すべての成果物およびキャッシュファイルはデフォルトで `<input_dir>/output/` に出力されます（入力元がすでに `output/` の場合はネストせずそのまま再利用します）。
 1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出 — 厳格な Fail-Fast）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。クラウドエラー発生時は即座に終了コード `1` で停止します。
-2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース — デフォルト `small` モデル）**：`--whisper-model small` をデフォルトとして `mlx-whisper` または `faster-whisper`（`word_timestamps=True`）を実行し、高精度な単語境界を `<basename>_words.json` にキャッシュします。
-3. **Stage 3（無音認識チャンキング、非カスケード再投影＆`agent_verdict` 品質ゲート）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割して同音異義語を校正した後、双方向弾性ウィンドウ（`cur_char_idx - 15`）、保守的フォールバック進行（`+ L` 文字）、再同期アンカー、および `source_bounds` 境界制限によって連鎖的なタイムスタンプずれを防止します（発話終了後の $+0.4\text{s}$ 読み取りバッファを維持しつつ `media_duration + 0.4s` で上限保護）。`<basename>_subtitle_report.json` の最上位に `agent_verdict`（`--strict` 指定時は失敗時に終了コード `2`、最大 1 回の自動修復リトライ）を出力します。
+2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース — デフォルト `small` モデル）**：Whisper `small` モデルをデフォルトとして `mlx-whisper` または `faster-whisper`（`word_timestamps=True`）を実行し、高精度な単語境界を `<basename>_words.json` にキャッシュします。
+3. **Stage 3（無音認識チャンキング、非カスケード再投影＆`agent_verdict` 品質ゲート）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割して同音異義語を校正した後、双方向弾性ウィンドウ（`cur_char_idx - 15`）、保守的フォールバック進行（`+ L` 文字）、再同期アンカー、および `source_bounds` 境界制限によって連鎖的なタイムスタンプずれを防止します（発話終了後の $+0.4\text{s}$ 読み取りバッファを維持しつつ `media_duration + 0.4s` で上限保護）。`<basename>_subtitle_report.json` の最上位に `agent_verdict` を出力し、品質ゲート未達時は Agent が最大 1 回の自動修復リトライを実行します。
 
 ---
 

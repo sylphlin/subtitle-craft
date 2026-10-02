@@ -93,3 +93,32 @@ python3 skills/subtitle-craft/scripts/generate_subtitles.py \
 2. Inspect `agent_verdict` in `<BASENAME>_subtitle_report.json`:
    - **`pass_quality_gate: true` (`suggested_action: "DELIVER"`)**: Present the audit metrics and deliverable file paths to the user.
    - **`pass_quality_gate: false` (`suggested_action: "ONE_SHOT_REMEDIATE"` / Exit Code `2`)**: Execute **at most ONE** automated self-healing retry with `--whisper-model small --force`. If the second run still fails the quality gate, stop immediately and report `[Degraded]` along with `fatal_violations` and the actionable review table to the user.
+
+---
+
+## CLI Options Reference (`generate_subtitles.py`)
+
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `-i`, `--input` | *(Required)* | Path or Google Drive URL to input video or audio file |
+| `-o`, `--output-dir` | `<input_dir>/output` | Output directory for SRT/VTT subtitles and audit reports |
+| `--outline` | `None` | User interview outline, topic summary, or glossary notes file/text |
+| `--script` | `None` | Path or text of full recording script or manuscript to anchor terminology |
+| `--language` | `auto` | Spoken language code (`auto`, `zh-TW`, `zh-CN`, `en`, `ja`, `ko`) |
+| `--whisper-model` | `small` | Whisper model size for Stage 2 acoustic transcription (`tiny`, `base`, `small`, `medium`, `large-v3`) |
+| `--model` | `gemini-3.8-flash` | Vertex AI Gemini model for Stage 1 and Stage 3 proofreading |
+| `--device` | `auto` | Device acceleration backend (`auto`, `mps`, `mlx`, `cuda`, `cpu`) |
+| `--chunk-size` | `80` | Subtitle entries per proofread batch |
+| `--workers` | `5` | Concurrent workers for parallel proofreading |
+| `--strict` | `False` | Exit with code `2` if `agent_verdict.pass_quality_gate` is `False` |
+| `--force` | `False` | Force re-running Whisper transcription and Gemini proofreading |
+| `--force-glossary` | `False` | Force re-extracting Stage 1 global glossary from scratch |
+| `--cleanup-gcs` | `False` | Delete staged glossary audio from GCS immediately after completion |
+| `--project` | `.env` | Google Cloud Project ID (`GOOGLE_CLOUD_PROJECT`) |
+| `--gcs-bucket`, `--bucket` | `.env` | GCS Bucket for audio staging (`SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`) |
+| `--location` | `global` | Vertex AI Gemini endpoint location |
+| `--region` | `us-central1` | GCS Bucket infrastructure region |
+| `--max-chars-cjk` | `15` | Maximum characters per line for CJK (`zh-TW`, `zh-CN`, `ja`) |
+| `--max-chars-korean` | `16` | Maximum characters per line for Korean (`ko`) |
+| `--max-chars-latin` | `42` | Maximum characters per line for Latin script (`en` and fallback) |
+

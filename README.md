@@ -127,29 +127,51 @@ flowchart TD
 
 ---
 
-## User Scenarios & Agent Prompts
+## Antigravity Usage & Scenarios
+
+Interact with the Agent in Antigravity using two methods:
+1. **Concise Slash + Mention (`/skill` + `@file`)**: Select `/subtitle-craft` and attach your media, outline, or script with `@`.
+2. **Natural Language Prompt**: Describe your subtitle requirements in plain language and attach `@` files or cloud links.
 
 ### Scenario 1: Standard YouTube & Netflix Subtitles
 - **Use Case**: Generate millisecond-accurate `.srt` and `.vtt` subtitles with homophone and terminology proofreading.
-- **Agent Prompt**:
-  > *"Generate YouTube subtitles for `output/final_cut.mp4` and proofread technical terms."*
-- **Deliverables**:
+- **Mode A (`/ + @` Concise Command)**:
+  ```text
+  /subtitle-craft File: @final_cut.mp4
+  ```
+- **Mode B (Natural Language Prompt)**:
+  ```text
+  Generate YouTube subtitles for @final_cut.mp4 and proofread technical terms.
+  ```
+- **Deliverables** (automatically saved to `<input_dir>/output/`):
   1. `final_cut.srt` and `final_cut.vtt` (Broadcast-aligned subtitle tracks).
   2. `final_cut_glossary.md` (Verified domain terminology and speaker table).
   3. `final_cut_subtitle_report.md` and `final_cut_subtitle_report.json` (8-dimension quality audit report).
 
 ### Scenario 2: Subtitles Anchored with an Interview Outline or Script
 - **Use Case**: Provide speaker names, brand spellings, or a recording script to guarantee 100% terminology consistency across the recording.
-- **Agent Prompt**:
-  > *"Generate subtitles for `interview.mp4` using `outline.md` and `script.md` as terminology references."*
+- **Mode A (`/ + @` Concise Command)**:
+  ```text
+  /subtitle-craft File: @interview.mp4, Outline: @outline.md, Script: @script.md
+  ```
+- **Mode B (Natural Language Prompt)**:
+  ```text
+  Generate subtitles for @interview.mp4 using @outline.md and @script.md as terminology references.
+  ```
 - **Deliverables**:
   1. `interview.srt` and `interview.vtt` (Proofread against the provided outline and script).
   2. `interview_glossary.md`, `interview_subtitle_report.md`, and `interview_subtitle_report.json`.
 
 ### Scenario 3: Direct Subtitle Generation from a Google Drive Link
 - **Use Case**: Process a video or audio file directly from a Google Drive link with automatic MD5 cache verification.
-- **Agent Prompt**:
-  > *"Generate Traditional Chinese subtitles for `https://drive.google.com/file/d/FILE_ID/view`."*
+- **Mode A (`/ + @` Concise Command)**:
+  ```text
+  /subtitle-craft URL: https://drive.google.com/file/d/FILE_ID/view, Language: zh-TW
+  ```
+- **Mode B (Natural Language Prompt)**:
+  ```text
+  Generate Traditional Chinese subtitles for https://drive.google.com/file/d/FILE_ID/view.
+  ```
 - **Deliverables**:
   1. `<video_name>.srt` and `<video_name>.vtt`.
   2. `<video_name>_glossary.md`, `<video_name>_subtitle_report.md`, and `<video_name>_subtitle_report.json`.
@@ -159,22 +181,22 @@ flowchart TD
 ## Detailed Pipeline Stages (v2.0 Architecture)
 
 ### Output Directory Isolation (`<input_dir>/output/`)
-- When `-o` / `--output-dir` is omitted, all final and intermediate deliverables (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) are saved inside `<input_dir>/output/`. If `<input_dir>` is already named `output`, the directory is reused directly without nested `output/output/` creation.
+- By default, all final and intermediate deliverables (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) are saved inside `<input_dir>/output/`. If `<input_dir>` is already named `output`, the directory is reused directly without nested `output/output/` creation.
 
 ### Stage 1: Global Audio Context & Consistency Glossary (Strict Fail-Fast)
 - Compresses the full episode audio to 48 kbps mono MP3, stages it to `gs://subtitle-craft-${PROJECT_ID}/raw/`, and scans the full recording with **Vertex AI Gemini 3.8 Flash** (`1M` token context).
 - Produces `<basename>_glossary.md` and extracts a compact Whisper `initial_prompt` ($\le 145$ characters) tailored to the target language (`zh-TW`, `zh-CN`, `en`, `ja`, `ko`).
 - Enforces strict fail-fast behavior: any GCS upload or Vertex AI error terminates immediately with exit code `1` and prints remediation steps.
 
-### Stage 2: Whisper Word-Level Acoustic Ground Truth (`--whisper-model small`)
-- Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core CPU) with `--whisper-model small` by default and `word_timestamps=True`.
+### Stage 2: Whisper Word-Level Acoustic Ground Truth (Default `small` Model)
+- Runs `mlx-whisper` (Apple Silicon Metal GPU / Neural Engine) or `faster-whisper` (`int8` multi-core CPU) with the Whisper `small` model by default and `word_timestamps=True`.
 - Saves `<basename>_raw_whisper.srt` and `<basename>_words.json` inside `<OUTPUT_DIR>` so subsequent proofreading runs reuse the cached acoustic baseline.
 
 ### Stage 3: Silence-Aware Multimodal Proofreading, Non-Cascading Re-Projection & `agent_verdict` Audit
 1. **Silence-Aware Semantic Chunking**: Splits SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$) to prevent mid-sentence cuts across chunk boundaries.
 2. **Multimodal Audio-Text Proofreading (Strict Fail-Fast)**: Slices the corresponding audio segment for each chunk, stages it to `gs://<bucket>/raw/audio_chunks/`, proofreads against both the audio waveform and the Global Glossary, and deletes the remote chunk in a `finally` block. Any unrecoverable chunk failure cancels pending workers and exits with code `1`.
 3. **Resilient Non-Cascading Word-Boundary Re-Projection**: Maps proofread subtitle lines back onto Whisper's physical word-level character timeline (`realign_subtitles_to_words`) using an elastic bidirectional character window (`cur_char_idx - 15` lookback), conservative fallback progression (`+ L` characters), re-synchronization anchoring (`cur_char_idx = m_end + 1`), and `source_bounds` enclosure. Applies broadcast rhythm sanitization (`180 ms` lead-in pre-roll, $+0.4\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging, $1.0\text{s}\text{–}6.0\text{s}$ duration bounds).
-4. **8-Dimension Streaming Quality Audit & `agent_verdict` Gate**: Evaluates line length (`CJK <= 15`, `ko <= 16`, `Latin <= 42`), reading speed (CPS), trailing punctuation, bracket closure, Markdown cleanliness, acoustic lock rate ($\ge 80.0\%$), timing overlaps/micro-gaps, and prolonged silences ($\ge 10\text{s}$). Writes a top-level `agent_verdict` object (`pass_quality_gate`, `acoustic_lock_rate_pct`, `last_out_vs_duration_diff_sec <= 0.5s`, `fatal_violations`, `suggested_action`) to `<basename>_subtitle_report.json`. When `--strict` is passed, exits with code `2` if `pass_quality_gate` is `false` to trigger at most one automated self-healing retry (`--whisper-model small --force`).
+4. **8-Dimension Streaming Quality Audit & `agent_verdict` Gate**: Evaluates line length (`CJK <= 15`, `ko <= 16`, `Latin <= 42`), reading speed (CPS), trailing punctuation, bracket closure, Markdown cleanliness, acoustic lock rate ($\ge 80.0\%$), timing overlaps/micro-gaps, and prolonged silences ($\ge 10\text{s}$). Writes a top-level `agent_verdict` object (`pass_quality_gate`, `acoustic_lock_rate_pct`, `last_out_vs_duration_diff_sec <= 0.5s`, `fatal_violations`, `suggested_action`) to `<basename>_subtitle_report.json`. If the quality gate fails, the Agent executes at most one automated self-healing retry.
 
 ---
 

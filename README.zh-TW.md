@@ -127,29 +127,51 @@ flowchart TD
 
 ---
 
-## 使用情境與 Agent 指令範例 (User Scenarios & Agent Prompts)
+## Antigravity 操作方式與使用情境 (Usage & Scenarios)
+
+在 Antigravity 中有兩種呼叫方式：
+1. **極簡指令（`/skill` + `@檔案`）**：輸入 `/subtitle-craft` 綁定技能，並用 `@` 指定影音檔、訪綱或講稿，無需額外贅述。
+2. **自然語言口語描述**：直接用口語描述需求並附上 `@` 檔案或雲端連結，Agent 會自動載入對應插件。
 
 ### 情境 1：標準 YouTube 與 Netflix 影視級字幕生成
 - **適用場景**：為影片或音訊自動生成毫秒級對齊的 `.srt` 與 `.vtt` 字幕，並校對同音字與技術專有名詞。
-- **Agent 指令範例**：
-  > *「幫我為 `output/final_cut.mp4` 產生繁體中文 YouTube 字幕，並校對技術專有名詞與同音字。」*
-- **交付成果**：
+- **方式 A（`/ + @` 極簡指令）**：
+  ```text
+  /subtitle-craft 檔案: @final_cut.mp4
+  ```
+- **方式 B（口語描述）**：
+  ```text
+  幫我為 @final_cut.mp4 產生繁體中文 YouTube 字幕，並校對技術專有名詞與同音字。
+  ```
+- **交付成果**（自動收納於 `<影片所在目錄>/output/`）：
   1. `final_cut.srt` 與 `final_cut.vtt`（符合串流閱讀節奏的雙格式字幕）。
   2. `final_cut_glossary.md`（全片專有名詞與講者對照表）。
   3. `final_cut_subtitle_report.md` 與 `final_cut_subtitle_report.json`（8 維度串流品質審核報告）。
 
 ### 情境 2：結合訪綱或錄音講稿強化專有名詞一致性
 - **適用場景**：提供訪談大綱、人名清單或錄音文稿，確保全片人名、品牌與領域術語 100% 精準一致。
-- **Agent 指令範例**：
-  > *「請參考 `outline.md` 與 `script.md` 的專有名詞，幫 `interview.mp4` 產生並校對繁體中文字幕。」*
+- **方式 A（`/ + @` 極簡指令）**：
+  ```text
+  /subtitle-craft 檔案: @interview.mp4, 大綱: @outline.md, 講稿: @script.md
+  ```
+- **方式 B（口語描述）**：
+  ```text
+  請參考 @outline.md 與 @script.md 的專有名詞，幫 @interview.mp4 產生並校對繁體中文字幕。
+  ```
 - **交付成果**：
   1. `interview.srt` 與 `interview.vtt`（依據訪綱與講稿完成術語鎖定之字幕）。
   2. `interview_glossary.md`、`interview_subtitle_report.md` 與 `interview_subtitle_report.json`。
 
 ### 情境 3：直接從 Google Drive 分享連結產生字幕
 - **適用場景**：直接傳入 Google Drive 影片或音訊連結，由 Agent 自動下載（支援遠端 MD5 快取驗證）並完成字幕產製。
-- **Agent 指令範例**：
-  > *「幫這個 Google Drive 影片 `https://drive.google.com/file/d/FILE_ID/view` 產生繁體中文雙格式字幕與品質審核報告。」*
+- **方式 A（`/ + @` 極簡指令）**：
+  ```text
+  /subtitle-craft 連結: https://drive.google.com/file/d/FILE_ID/view, 語言: 繁體中文
+  ```
+- **方式 B（口語描述）**：
+  ```text
+  幫這個 Google Drive 影片 https://drive.google.com/file/d/FILE_ID/view 產生繁體中文雙格式字幕與品質審核報告。
+  ```
 - **交付成果**：
   1. `<影片名稱>.srt` 與 `<影片名稱>.vtt`。
   2. `<影片名稱>_glossary.md`、`<影片名稱>_subtitle_report.md` 與 `<影片名稱>_subtitle_report.json`。
@@ -158,13 +180,13 @@ flowchart TD
 
 ## 三階段核心技術說明 (v2.0 架構升級)
 
-- **輸出目錄自動隔離（`<input_dir>/output/`）**：未指定 `-o` / `--output-dir` 時，系統預設將所有最終與中繼產物（`.srt`、`.vtt`、`_glossary.md`、`_raw_whisper.srt`、`_words.json`、`_subtitle_report.md`、`_subtitle_report.json`）收納於 `<input_dir>/output/` 子目錄；若輸入檔案已位於 `output/` 目錄下則直接重用，避免產生 `output/output/` 巢狀結構。
+- **輸出目錄自動隔離（`<input_dir>/output/`）**：系統預設將所有最終與中繼產物（`.srt`、`.vtt`、`_glossary.md`、`_raw_whisper.srt`、`_words.json`、`_subtitle_report.md`、`_subtitle_report.json`）收納於 `<input_dir>/output/` 子目錄；若輸入檔案已位於 `output/` 目錄下則直接重用，避免產生 `output/output/` 巢狀結構。
 1. **Stage 1（全域音訊聽覺掃描與詞彙表提取 — 嚴格 Fail-Fast）**：將全片音訊壓縮並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 3.8 Flash**（`1M` Context）產出 `<basename>_glossary.md` 與對應語系的 Whisper 初始引導詞（$\le 145$ 字元）。若發生雲端權限或連線錯誤，立即以狀態碼 `1` 終止並輸出診斷步驟，絕不靜默降級。
-2. **Stage 2（Whisper 毫秒級逐字聲學時間戳 — 預設 `small` 模型）**：預設採用 `--whisper-model small` 執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取高精準度物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
+2. **Stage 2（Whisper 毫秒級逐字聲學時間戳 — 預設 `small` 模型）**：預設採用 Whisper `small` 模型執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取高精準度物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
 3. **Stage 3（靜音感知分塊、非連鎖防漂移聲學重投影與 `agent_verdict` 品質閘門）**：
    - 於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字（雲端錯誤立即取消佇列並以狀態碼 `1` 終止）。
    - **非連鎖防漂移重投影（`realign_subtitles_to_words`）**：採用雙向彈性字元搜尋視窗（`cur_char_idx - 15` 回溯容錯）、保守退避推進（`+ L` 字元）、重同步錨點（`cur_char_idx = m_end + 1`）與 `source_bounds` 邊界夾制，確保單行退避絕不引發後續字幕連鎖時間漂移；並於語音結束後保留 $+0.4\text{s}$ 閱讀尾韻緩衝（上限鎖定於 `media_duration + 0.4s`）。
-   - **8 維度串流品質審核與 `agent_verdict` 機器可讀閘門**：於 `<basename>_subtitle_report.json` 頂層寫入 `agent_verdict`（檢核 `acoustic_lock_rate_pct >= 80.0%`、`last_out_vs_duration_diff_sec <= 0.5s` 與零重疊）。搭配 `--strict` 參數時，若未通過品質閘門將回傳退出碼 `2`，支援 AI Agent 執行最多 1 次自動重試修復（`--whisper-model small --force`）。
+   - **8 維度串流品質審核與 `agent_verdict` 機器可讀閘門**：於 `<basename>_subtitle_report.json` 頂層寫入 `agent_verdict`（檢核 `acoustic_lock_rate_pct >= 80.0%`、`last_out_vs_duration_diff_sec <= 0.5s` 與零重疊）。若未通過品質閘門，AI Agent 會自動執行最多 1 次自我修復重試。
 
 ---
 
