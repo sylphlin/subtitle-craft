@@ -634,8 +634,291 @@ def split_blocks_into_semantic_chunks(raw_blocks, target_chunk_size=80, min_chun
     return chunks
 
 
+def _parse_cjk_int(num_str):
+    """Convert a Chinese or Japanese numeral string (up to thousands) into an integer string."""
+    if not num_str:
+        return num_str
+    digit_map = {
+        "零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "两": 2,
+        "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+    }
+    mult_map = {"十": 10, "廿": 20, "卅": 30, "百": 100, "千": 1000}
+
+    if all(ch in digit_map for ch in num_str):
+        return "".join(str(digit_map[ch]) for ch in num_str)
+
+    total = 0
+    current = 0
+    for ch in num_str:
+        if ch in digit_map:
+            current = digit_map[ch]
+        elif ch in mult_map:
+            mult = mult_map[ch]
+            if mult in (20, 30):
+                total += mult
+                current = 0
+            else:
+                total += (current if current > 0 else 1) * mult
+                current = 0
+        else:
+            return num_str
+    total += current
+    return str(total)
+
+
+def _parse_ko_sino_int(num_str):
+    """Convert a compound Sino-Korean numeral string into an integer string."""
+    if not num_str:
+        return num_str
+    digit_map = {
+        "영": 0, "공": 0, "일": 1, "이": 2, "삼": 3, "사": 4,
+        "오": 5, "육": 6, "칠": 7, "팔": 8, "구": 9,
+    }
+    mult_map = {"십": 10, "백": 100, "천": 1000}
+
+    if all(ch in digit_map for ch in num_str):
+        return "".join(str(digit_map[ch]) for ch in num_str)
+
+    total = 0
+    current = 0
+    for ch in num_str:
+        if ch in digit_map:
+            current = digit_map[ch]
+        elif ch in mult_map:
+            mult = mult_map[ch]
+            total += (current if current > 0 else 1) * mult
+            current = 0
+        else:
+            return num_str
+    total += current
+    return str(total)
+
+
+def _convert_cjk_or_digits(token_str):
+    """Normalize a mixed CJK, Korean, and Arabic numeric token into standard digits."""
+    if not token_str:
+        return token_str
+    s = re.sub(
+        r"[零〇一二兩两三四五六七八九十廿卅百千]+",
+        lambda m: _parse_cjk_int(m.group(0)),
+        token_str,
+    )
+    s = re.sub(
+        r"[영공일이삼사오육칠팔구십백천]+",
+        lambda m: _parse_ko_sino_int(m.group(0)),
+        s,
+    )
+    return s
+
+
+_EN_UNITS = {
+    "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+}
+_EN_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+
+
+def _apply_span_regex(char_items, pattern, repl_fn, flags=0):
+    """Apply a regex transformation on char_items while preserving physical [start, end] spans."""
+    if not char_items:
+        return char_items
+    text = "".join(it["char"] for it in char_items)
+    matches = list(re.finditer(pattern, text, flags=flags))
+    if not matches:
+        return char_items
+
+    out = []
+    last_idx = 0
+    for m in matches:
+        s_idx, e_idx = m.start(), m.end()
+        if s_idx > last_idx:
+            out.extend(char_items[last_idx:s_idx])
+        if s_idx < e_idx:
+            t_s = char_items[s_idx]["start"]
+            t_e = char_items[e_idx - 1]["end"]
+        else:
+            t_s = char_items[min(s_idx, len(char_items) - 1)]["start"]
+            t_e = t_s + 0.01
+        rep_str = repl_fn(m)
+        if rep_str:
+            dur = max(0.0, t_e - t_s)
+            c_dur = dur / len(rep_str)
+            for idx, ch in enumerate(rep_str):
+                out.append({
+                    "char": ch,
+                    "start": t_s + idx * c_dur,
+                    "end": t_s + (idx + 1) * c_dur,
+                })
+        last_idx = e_idx
+    if last_idx < len(char_items):
+        out.extend(char_items[last_idx:])
+    return out
+
+
+def _normalize_char_items_for_alignment(char_items):
+    """
+    Normalize character timeline items for acoustic alignment across CJK, Korean, and Latin locales.
+    Preserves spoken semantic symbols (%, $, ¥, €, £, ₩, °, +, &, /, and decimal points between digits)
+    while converting spoken numbers, decimals, percentages, and currencies into canonical forms.
+    """
+    import unicodedata
+
+    if not char_items:
+        return []
+
+    norm_items = []
+    for it in char_items:
+        n_str = unicodedata.normalize("NFKC", it["char"]).lower()
+        if not n_str:
+            continue
+        dur = max(0.0, it["end"] - it["start"])
+        c_dur = dur / len(n_str)
+        for idx, ch in enumerate(n_str):
+            norm_items.append({
+                "char": ch,
+                "start": it["start"] + idx * c_dur,
+                "end": it["start"] + (idx + 1) * c_dur,
+            })
+
+    # 1. Strip silent thousand-separator commas inside numbers (e.g., 1,000 -> 1000)
+    norm_items = _apply_span_regex(norm_items, r"(?<=\d),(?=\d)", lambda _: "")
+
+    # 2. English compound tens + units (e.g., twenty-five -> 25)
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s\-]+(one|two|three|four|five|six|seven|eight|nine)\b",
+        lambda m: str(_EN_TENS[m.group(1)] + _EN_UNITS[m.group(2)]),
+    )
+    # Single English number tokens
+    en_num_pat = r"\b(" + "|".join(list(_EN_TENS.keys()) + list(_EN_UNITS.keys())) + r")\b"
+    norm_items = _apply_span_regex(
+        norm_items,
+        en_num_pat,
+        lambda m: str(_EN_TENS.get(m.group(1), _EN_UNITS.get(m.group(1), m.group(1)))),
+    )
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"\b(\d+)\s+hundred(?:\s+(?:and\s+)?(\d+))?\b",
+        lambda m: str(int(m.group(1)) * 100 + (int(m.group(2)) if m.group(2) else 0)),
+    )
+    norm_items = _apply_span_regex(norm_items, r"(?<=\d)\s*point\s*(?=\d)", lambda _: ".")
+    norm_items = _apply_span_regex(norm_items, r"(?<=\d)\s*per\s*cent\b", lambda _: "%")
+
+    # 3. CJK spoken percentage prefix (百分之X -> X%)
+    def _cjk_pct_repl(m):
+        inner = m.group(1)
+        inner = re.sub(
+            r"([零〇一二兩两三四五六七八九十廿卅百千萬万\d]+)\s*[點点]\s*([零〇一二兩两三四五六七八九\d]+)",
+            lambda dm: f"{_convert_cjk_or_digits(dm.group(1))}.{_convert_cjk_or_digits(dm.group(2))}",
+            inner,
+        )
+        return f"{_convert_cjk_or_digits(inner)}%"
+
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"百分之\s*([零〇一二兩两三四五六七八九十廿卅百千萬万\d\.點点]+)",
+        _cjk_pct_repl,
+    )
+
+    # 4. CJK and Korean spoken decimal points (三點八 -> 3.8, 삼점팔 -> 3.8)
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"([零〇一二兩两三四五六七八九十廿卅百千萬万\d]+)\s*[點点]\s*([零〇一二兩两三四五六七八九\d]+)",
+        lambda m: f"{_convert_cjk_or_digits(m.group(1))}.{_convert_cjk_or_digits(m.group(2))}",
+    )
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"([영공일이삼사오육칠팔구십백천만\d]+)\s*점\s*([영공일이삼사오육칠팔구\d]+)",
+        lambda m: f"{_convert_cjk_or_digits(m.group(1))}.{_convert_cjk_or_digits(m.group(2))}",
+    )
+
+    # 5. Japanese and Korean spoken percentages (パーセント / 퍼센트 / 프로 -> %)
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"([零〇一二兩两三四五六七八九十廿卅百千萬万\d\.]+)\s*(?:パーセント|ぱーせんと)",
+        lambda m: f"{_convert_cjk_or_digits(m.group(1))}%",
+    )
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"([영공일이삼사오육칠팔구십백천만\d\.]+)\s*(?:퍼센트|프로)",
+        lambda m: f"{_convert_cjk_or_digits(m.group(1))}%",
+    )
+
+    # 6. CJK numeral sequences and compound Sino-Korean numeral sequences
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"[零〇一二兩两三四五六七八九十廿卅百千]+",
+        lambda m: _parse_cjk_int(m.group(0)),
+    )
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"[영공일이삼사오육칠팔구]*[십백천][영공일이삼사오육칠팔구십백천]*",
+        lambda m: _parse_ko_sino_int(m.group(0)),
+    )
+
+    # 7. Spoken currency expressions ($100 <-> 100美金 / 100 dollars / 100달러)
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"(?:nt\$|us\$|\$|美金|美元)\s*(\d+(?:\.\d+)?)\s*(?:美金|美元|元|塊|块)?",
+        lambda m: f"${m.group(1)}",
+    )
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"(\d+(?:\.\d+)?)\s*(?:美金|美元|塊美金|块美金|dollars?\b|달러)",
+        lambda m: f"${m.group(1)}",
+    )
+
+    # 8. Strip silent punctuation while preserving decimal '.' between digits and semantic symbols (%, $, ¥, €, £, ₩, °, +, &, /)
+    norm_items = _apply_span_regex(norm_items, r"(?<!\d)\.|\.(?!\d)", lambda _: "")
+    norm_items = _apply_span_regex(
+        norm_items,
+        r"[\s,\?!，。？！、：:;；—\-~\"'「」『』“”‘’【】《》〈〉…·]+",
+        lambda _: "",
+    )
+    return norm_items
+
+
+def normalize_text_for_alignment(text):
+    """Normalize subtitle or transcript text into its canonical alignment string."""
+    if not text:
+        return ""
+    dummy_items = [{"char": ch, "start": 0.0, "end": 0.01} for ch in text]
+    norm_items = _normalize_char_items_for_alignment(dummy_items)
+    return "".join(it["char"] for it in norm_items)
+
+
+def _build_normalized_char_timeline(all_words):
+    """Build a normalized character timeline from Whisper word objects while preserving acoustic boundaries."""
+    if not all_words:
+        return []
+    raw_items = []
+    for idx, w in enumerate(all_words):
+        w_raw = str(w.get("word", ""))
+        if not w_raw:
+            continue
+        w_start = float(w.get("start", 0.0))
+        w_end = float(w.get("end", w_start + 0.1))
+        w_dur = max(0.01, w_end - w_start)
+        c_dur = w_dur / max(1, len(w_raw))
+        for c_idx, ch in enumerate(w_raw):
+            ch_s = w_start + c_idx * c_dur
+            ch_e = ch_s + c_dur
+            raw_items.append({"char": ch, "start": ch_s, "end": ch_e})
+        if idx + 1 < len(all_words):
+            raw_items.append({"char": " ", "start": w_end, "end": w_end})
+    return _normalize_char_items_for_alignment(raw_items)
+
+
 def align_split_clauses_with_words(final_parts, t_start, t_end, all_words=None):
-    """Pin split sub-clauses to physical word boundaries in all_words."""
+    """
+    Pin split sub-clauses to physical word boundaries in all_words.
+    Uses minimum edit-distance prefix matching with acoustic pause weighting.
+    """
     if not all_words or len(final_parts) <= 1:
         tot_len = max(1, sum(len(p) for p in final_parts))
         cur_t = t_start
@@ -662,30 +945,61 @@ def align_split_clauses_with_words(final_parts, t_start, t_end, all_words=None):
             cur_t += p_dur
         return items
 
-    w_chars = []
-    for w in nearby_words:
-        w_text = re.sub(r"[\s\.,\?!，。？！、：:;；—\-~]+", "", w.get("word", ""))
-        w_s = float(w.get("start", t_start))
-        w_e = float(w.get("end", t_end))
-        w_chars.append({"text": w_text, "start": w_s, "end": w_e})
+    w_chars = [
+        {"text": it["char"], "start": it["start"], "end": it["end"]}
+        for it in _build_normalized_char_timeline(nearby_words)
+    ]
 
-    first_clean = re.sub(r"[\s\.,\?!，。？！、：:;；—\-~]+", "", final_parts[0]).lower()
+    first_clean = normalize_text_for_alignment(final_parts[0])
+    rest_clean = normalize_text_for_alignment("".join(final_parts[1:]))
+
     best_split_time = None
-    accumulated = ""
-    for wc in w_chars:
-        accumulated += wc["text"].lower()
-        if len(accumulated) >= len(first_clean) * 0.75:
-            if first_clean in accumulated or accumulated in first_clean:
-                best_split_time = wc["end"]
-                break
+    best_next_start = None
+    best_split_score = -1.0
+
+    if first_clean and len(w_chars) >= 2:
+        for k in range(len(w_chars) - 1):
+            cand_end = w_chars[k]["end"]
+            if not (t_start + 0.4 <= cand_end <= t_end - 0.4):
+                continue
+            prefix_str = "".join(wc["text"] for wc in w_chars[: k + 1])
+            suffix_str = "".join(wc["text"] for wc in w_chars[k + 1 :])
+            if not prefix_str:
+                continue
+
+            # Exact containment fast-path
+            if len(prefix_str) >= len(first_clean) * 0.75 and (
+                first_clean in prefix_str or prefix_str in first_clean
+            ):
+                sim_prefix = 1.0
+            else:
+                sim_prefix = difflib.SequenceMatcher(None, prefix_str, first_clean).ratio()
+
+            sim_suffix = (
+                difflib.SequenceMatcher(None, suffix_str, rest_clean).ratio()
+                if rest_clean and suffix_str
+                else sim_prefix
+            )
+            text_sim = 0.60 * sim_prefix + 0.40 * sim_suffix
+            if text_sim < 0.45:
+                continue
+
+            pause_gap = max(0.0, w_chars[k + 1]["start"] - cand_end)
+            pause_bonus = min(0.15, pause_gap * 0.30)
+            composite = text_sim + pause_bonus
+            if composite > best_split_score + 1e-4:
+                best_split_score = composite
+                best_split_time = cand_end
+                best_next_start = max(cand_end, min(w_chars[k + 1]["start"], t_end - 0.4))
 
     if best_split_time and t_start + 0.4 <= best_split_time <= t_end - 0.4:
+        next_t_start = best_next_start if best_next_start is not None else best_split_time
         items = [{"start": t_start, "end": best_split_time, "text": final_parts[0]}]
         rem_parts = final_parts[1:]
         if len(rem_parts) == 1:
-            items.append({"start": best_split_time, "end": t_end, "text": rem_parts[0]})
+            items.append({"start": next_t_start, "end": t_end, "text": rem_parts[0]})
         else:
-            items.extend(align_split_clauses_with_words(rem_parts, best_split_time, t_end, nearby_words))
+            items.extend(align_split_clauses_with_words(rem_parts, next_t_start, t_end, nearby_words))
         return items
     else:
         tot_len = max(1, sum(len(p) for p in final_parts))
@@ -782,9 +1096,9 @@ def clean_subtitle_text(text, language="zh-TW"):
     """
     Format subtitle text according to Netflix and YouTube typography rules:
       1. CJK Policy (zh-TW, zh-CN, ja, ko):
-         - Replace inline commas with single spaces.
-         - Normalize CJK-Latin and CJK-number spacing.
-         - Strip trailing punctuation [。，、；:;,.—-] while preserving [？!……].
+         - Replace inline clause commas with single spaces while preserving numeric thousand separators (1,000).
+         - Normalize CJK-Latin, CJK-number, and CJK-currency/percentage spacing.
+         - Strip trailing punctuation [。，、；:;,.—-] while preserving [？!……] and semantic symbols (%, $, °C).
       2. Latin Policy (en and fallback locales):
          - Preserve inline commas and standard sentence punctuation.
          - Strip only trailing whitespace and stray isolated ASCII hyphens (-).
@@ -802,9 +1116,17 @@ def clean_subtitle_text(text, language="zh-TW"):
         line = re.sub(r"(\*{1,3}|_{2,}|`{1,3}|(?<=^)\s*#{1,6}\s+)", "", line)
 
         if norm_lang in ["zh-TW", "zh-CN", "ja", "ko"]:
-            line = re.sub(r"[，,]+", " ", line)
-            line = re.sub(r"([\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af])([A-Za-z0-9])", r"\1 \2", line)
-            line = re.sub(r"([A-Za-z0-9])([\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af])", r"\1 \2", line)
+            line = re.sub(r"(?:(?<!\d),|,(?!\d)|，)+", " ", line)
+            line = re.sub(
+                r"([\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af])([A-Za-z0-9]|[$¥€£₩]\d)",
+                r"\1 \2",
+                line,
+            )
+            line = re.sub(
+                r"([A-Za-z0-9]|\d[%°℃+])([\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af])",
+                r"\1 \2",
+                line,
+            )
             line = re.sub(r"[ \t]+", " ", line)
             line = re.sub(r"[\s。，、；:;,.—-]+$", "", line).strip()
         else:
@@ -827,7 +1149,7 @@ def calc_display_width(text, norm_lang="zh-TW"):
 
 
 def split_long_clause(text, max_w=15.0, norm_lang="zh-TW"):
-    """Split a clause exceeding max_w into natural sub-clauses."""
+    """Split a clause exceeding max_w into natural sub-clauses without breaking numeric thousand separators."""
     w = calc_display_width(text, norm_lang)
     if w <= max_w:
         return [clean_subtitle_text(text, language=norm_lang)]
@@ -852,7 +1174,7 @@ def split_long_clause(text, max_w=15.0, norm_lang="zh-TW"):
         if len(chunks) > 1:
             return chunks
 
-    sub_parts = [p.strip() for p in re.split(r"(?<=[、，,])", text) if p.strip()]
+    sub_parts = [p.strip() for p in re.split(r"(?<=[、，])|(?<!\d),(?!\d)", text) if p.strip()]
     if len(sub_parts) > 1:
         chunks = []
         cur = []
@@ -895,38 +1217,23 @@ def score_candidate(cand_str, clean_t):
 def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_video_start=False, source_bounds=None):
     """
     Realign LLM-proofread subtitle lines to physical word boundaries from Whisper word timestamps.
-    Uses an elastic bidirectional character window, conservative fallback progression,
-    re-synchronization anchoring, and source bounding-box enclosure to prevent cascading drift.
+    Executes a BBC-inspired multi-pass alignment architecture:
+      1. Multi-language spoken numeral, decimal, percentage, and currency normalization.
+      2. Chunk-level global difflib milestone seeding to prevent drift across long edits.
+      3. Pass 1: High-confidence line locking within milestone-guided elastic windows.
+      4. Pass 2: Neighbor-anchor bounded interpolation onto unconsumed Whisper characters for unlocked lines.
+      5. Pass 3: Acoustic lead-in (-0.18s) and monotonic boundary sanitization.
     Returns: (realigned_srt, alignment_stats)
     """
-    default_stats = {"total": 0, "locked": 0, "fallback": 0, "fallback_indices": []}
+    default_stats = {"total": 0, "locked": 0, "fallback": 0, "fallback_indices": [], "interpolated": 0}
     if not all_words:
         return proofread_srt, default_stats
 
-    char_timeline = []
-    for w in all_words:
-        w_raw = w.get("word", "")
-        w_text = re.sub(r"[\s\.,\?!，。？！、：:;；—\-~]+", "", w_raw)
-        if not w_text:
-            continue
-        w_start = float(w.get("start", 0.0))
-        w_end = float(w.get("end", w_start + 0.1))
-        w_dur = max(0.01, w_end - w_start)
-        char_dur = w_dur / max(1, len(w_text))
-        for idx, ch in enumerate(w_text):
-            ch_s = w_start + idx * char_dur
-            ch_e = ch_s + char_dur
-            char_timeline.append({
-                "char": ch,
-                "start": ch_s,
-                "end": ch_e
-            })
-
+    char_timeline = _build_normalized_char_timeline(all_words)
     if not char_timeline:
         return proofread_srt, default_stats
 
-    whisper_chars = "".join(c["char"] for c in char_timeline)
-    whisper_chars_lower = whisper_chars.lower()
+    whisper_chars_lower = "".join(c["char"] for c in char_timeline)
     total_chars = len(char_timeline)
 
     blocks = [b.strip() for b in proofread_srt.strip().split("\n\n") if b.strip()]
@@ -939,7 +1246,7 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             items.append({
                 "fallback_start": parse_timestamp_str(t1.strip()),
                 "fallback_end": parse_timestamp_str(t2.strip()),
-                "text": txt
+                "text": txt,
             })
         elif len(lines) == 2 and "-->" in lines[0]:
             t1, t2 = lines[0].split("-->")
@@ -947,7 +1254,7 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             items.append({
                 "fallback_start": parse_timestamp_str(t1.strip()),
                 "fallback_end": parse_timestamp_str(t2.strip()),
-                "text": txt
+                "text": txt,
             })
 
     if not items:
@@ -966,33 +1273,77 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             char_timeline[-1]["end"],
         )
 
+    # Prepare normalized text and global difflib milestones across the chunk
+    proofread_concat_parts = []
+    p_offset = 0
+    for item in items:
+        raw_text = item["text"]
+        raw_no_brackets = re.sub(r"[（\(].*?[）\)]", "", raw_text)
+        clean_t = normalize_text_for_alignment(raw_text)
+        clean_t_nb = normalize_text_for_alignment(raw_no_brackets)
+        item["clean_t"] = clean_t
+        item["clean_t_nb"] = clean_t_nb
+        item["has_bracket_variant"] = bool(clean_t_nb and clean_t_nb != clean_t)
+        item["p_start"] = p_offset
+        p_offset += len(clean_t)
+        item["p_end"] = p_offset
+        proofread_concat_parts.append(clean_t)
+
+    proofread_concat = "".join(proofread_concat_parts)
+    min_milestone_len = 3 if total_chars < 30 else 4
+    global_blocks = [
+        b for b in difflib.SequenceMatcher(None, whisper_chars_lower, proofread_concat, autojunk=False).get_matching_blocks()
+        if b.size >= min_milestone_len
+    ]
+
+    def _estimate_global_w_pos(p_pos):
+        """Estimate Whisper character position from chunk-level global matching milestones."""
+        if not global_blocks:
+            return None
+        for idx_b, b in enumerate(global_blocks):
+            if b.b <= p_pos <= b.b + b.size:
+                return b.a + (p_pos - b.b)
+            if p_pos < b.b:
+                if idx_b == 0:
+                    return max(0, b.a - (b.b - p_pos))
+                prev_b = global_blocks[idx_b - 1]
+                p_span = max(1, b.b - (prev_b.b + prev_b.size))
+                w_span = max(0, b.a - (prev_b.a + prev_b.size))
+                ratio = (p_pos - (prev_b.b + prev_b.size)) / p_span
+                return int((prev_b.a + prev_b.size) + ratio * w_span)
+        last_b = global_blocks[-1]
+        return min(total_chars - 1, (last_b.a + last_b.size) + (p_pos - (last_b.b + last_b.size)))
+
     alignment_stats = {
         "total": len(items),
         "locked": 0,
         "fallback": 0,
-        "fallback_indices": []
+        "fallback_indices": [],
+        "interpolated": 0,
     }
 
+    # Pass 1: High-confidence line locking with milestone-guided elastic window
     cur_char_idx = 0
     min_allowed_start = 0
-    realigned_items = []
+    pass1_records = []
 
     for idx, item in enumerate(items):
         raw_text = item["text"]
-        clean_t = re.sub(r"[\s\.,\?!，。？！、：:;；—\-~]+", "", raw_text).lower()
+        clean_t = item["clean_t"]
         if not clean_t:
             continue
 
-        clean_t_no_brackets = re.sub(r"[（\(].*?[）\)]", "", clean_t)
-        has_bracket_variant = bool(clean_t_no_brackets and clean_t_no_brackets != clean_t)
-
+        clean_t_no_brackets = item["clean_t_nb"]
+        has_bracket_variant = item["has_bracket_variant"]
         L = len(clean_t)
         best_match = None
         best_score = -1.0
 
-        # Elastic bidirectional search window with lookback tolerance
-        search_start = max(min_allowed_start, cur_char_idx - 15)
-        search_extent = min(total_chars, cur_char_idx + max(L * 2 + 25, 80))
+        est_w = _estimate_global_w_pos(item["p_start"])
+        anchor_w = max(min_allowed_start, est_w) if est_w is not None else cur_char_idx
+
+        search_start = max(min_allowed_start, min(cur_char_idx, anchor_w) - 15)
+        search_extent = min(total_chars, max(cur_char_idx, anchor_w) + max(L * 2 + 25, 80))
         if search_extent < search_start:
             search_start = min(min_allowed_start, total_chars)
             search_extent = total_chars
@@ -1004,6 +1355,8 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
                 if has_bracket_variant:
                     sc_nb = score_candidate(cand_str, clean_t_no_brackets)
                     sc = max(sc, sc_nb)
+                if est_w is not None and abs(s_pos - est_w) <= 3:
+                    sc += 0.02
                 if sc > best_score + 1e-4:
                     best_score = sc
                     best_match = (s_pos, s_pos + cand_len - 1)
@@ -1013,24 +1366,101 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             m_start, m_end = best_match
             t_start = char_timeline[m_start]["start"]
             t_end = char_timeline[m_end]["end"]
-            # Re-synchronization anchor: snap cursor to matched character end
             cur_char_idx = m_end + 1
             min_allowed_start = m_start + 1
             is_locked = True
             alignment_stats["locked"] += 1
         else:
-            # Conservative fallback progression: advance by L chars without timestamp-skipping
-            t_start = item.get("fallback_start", bound_start)
-            t_end = item.get("fallback_end", t_start + 2.0)
-            # Bounding box enclosure for merged or fallback lines
-            t_start = max(bound_start, min(t_start, bound_end))
-            t_end = min(bound_end, max(t_end, min(bound_end, t_start + 0.5)))
-            cur_char_idx = min(total_chars, cur_char_idx + L)
+            m_start, m_end = None, None
+            t_start = max(bound_start, min(item.get("fallback_start", bound_start), bound_end))
+            t_end = min(bound_end, max(item.get("fallback_end", t_start + 2.0), min(bound_end, t_start + 0.5)))
+            cur_char_idx = min(total_chars, (anchor_w if est_w is not None else cur_char_idx) + L)
             is_locked = False
             alignment_stats["fallback"] += 1
             alignment_stats["fallback_indices"].append(item.get("index", idx + 1))
 
-        lead_sec = 0.180
+        pass1_records.append({
+            "index": item.get("index", idx + 1),
+            "start": t_start,
+            "end": t_end,
+            "text": raw_text,
+            "clean_len": max(1, L),
+            "locked": is_locked,
+            "m_start": m_start,
+            "m_end": m_end,
+        })
+
+    # Pass 2: BBC Neighbor-Anchor Bounded Interpolation for unlocked runs
+    n_rec = len(pass1_records)
+    r_idx = 0
+    while r_idx < n_rec:
+        if pass1_records[r_idx]["locked"]:
+            r_idx += 1
+            continue
+        run_start = r_idx
+        while r_idx < n_rec and not pass1_records[r_idx]["locked"]:
+            r_idx += 1
+        run_end = r_idx - 1
+
+        prev_rec = pass1_records[run_start - 1] if run_start > 0 else None
+        next_rec = pass1_records[run_end + 1] if (run_end + 1) < n_rec else None
+
+        if prev_rec is not None or next_rec is not None:
+            gap_c_start = (prev_rec["m_end"] + 1) if prev_rec is not None else 0
+            gap_c_end = (next_rec["m_start"] - 1) if next_rec is not None else (total_chars - 1)
+            unlocked_slice = pass1_records[run_start : run_end + 1]
+            total_weight = sum(x["clean_len"] for x in unlocked_slice)
+            n_gap_chars = gap_c_end - gap_c_start + 1
+
+            # Interpolate onto unconsumed Whisper characters when bounded by anchors
+            both_bounded = (prev_rec is not None and next_rec is not None)
+            reasonable_edge_span = n_gap_chars <= (total_weight * 3 + 15)
+            if n_gap_chars > 0 and (both_bounded or reasonable_edge_span):
+                gap_chars = char_timeline[gap_c_start : gap_c_end + 1]
+                if len(gap_chars) >= len(unlocked_slice):
+                    acc_w = 0
+                    for u_i, u_rec in enumerate(unlocked_slice):
+                        c_s = int(round((acc_w / total_weight) * len(gap_chars)))
+                        acc_w += u_rec["clean_len"]
+                        c_e = int(round((acc_w / total_weight) * len(gap_chars))) - 1
+                        c_s = max(0, min(c_s, len(gap_chars) - 1))
+                        c_e = max(c_s, min(c_e, len(gap_chars) - 1))
+                        u_rec["start"] = gap_chars[c_s]["start"]
+                        u_rec["end"] = gap_chars[c_e]["end"]
+                        u_rec["interpolated"] = True
+                        alignment_stats["interpolated"] += 1
+                else:
+                    span_s = gap_chars[0]["start"]
+                    span_e = max(span_s + 0.2 * len(unlocked_slice), gap_chars[-1]["end"])
+                    span_dur = span_e - span_s
+                    cur_s = span_s
+                    for u_rec in unlocked_slice:
+                        part_dur = span_dur * (u_rec["clean_len"] / total_weight)
+                        u_rec["start"] = cur_s
+                        u_rec["end"] = cur_s + part_dur
+                        u_rec["interpolated"] = True
+                        alignment_stats["interpolated"] += 1
+                        cur_s += part_dur
+            elif both_bounded and next_rec["start"] > prev_rec["end"] + 0.05:
+                span_s = prev_rec["end"]
+                span_e = next_rec["start"]
+                span_dur = span_e - span_s
+                cur_s = span_s
+                for u_rec in unlocked_slice:
+                    part_dur = span_dur * (u_rec["clean_len"] / total_weight)
+                    u_rec["start"] = cur_s
+                    u_rec["end"] = cur_s + part_dur
+                    u_rec["interpolated"] = True
+                    alignment_stats["interpolated"] += 1
+                    cur_s += part_dur
+
+    # Pass 3: Lead-in and monotonic boundary sanitization
+    lead_sec = 0.180
+    realigned_items = []
+    for idx, rec in enumerate(pass1_records):
+        t_start = rec["start"]
+        t_end = rec["end"]
+        is_locked = rec["locked"]
         target_start = max(0.0, t_start - lead_sec)
 
         if idx == 0 and is_video_start:
@@ -1056,11 +1486,12 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
             t_end = min(bound_end, t_start + 0.5) if not is_locked else (t_start + 0.5)
 
         realigned_items.append({
-            "index": item.get("index", idx + 1),
+            "index": rec["index"],
             "start": t_start,
             "end": t_end,
-            "text": raw_text,
+            "text": rec["text"],
             "locked": is_locked,
+            "interpolated": rec.get("interpolated", False),
         })
 
     out_blocks = []
@@ -1070,6 +1501,7 @@ def realign_subtitles_to_words(proofread_srt, all_words, language="zh-TW", is_vi
         out_blocks.append(f"{idx}\n{s_str} --> {e_str}\n{it['text']}\n")
 
     return "\n\n".join(out_blocks).strip() + "\n", alignment_stats
+
 
 
 def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_duration=6.0,
@@ -1304,7 +1736,7 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
     else:
         print(f"  ► All {num_chunks} chunks served directly from chunk cache (100%).")
 
-    overall_alignment_stats = {"total": 0, "locked": 0, "fallback": 0, "fallback_indices": []}
+    overall_alignment_stats = {"total": 0, "locked": 0, "fallback": 0, "fallback_indices": [], "interpolated": 0}
     if all_words:
         print("  ► [Acoustic Re-projection] Snapping subtitle boundaries to Whisper word-level ground truth (chunk-scoped)...")
 
@@ -1337,6 +1769,7 @@ def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_s
             overall_alignment_stats["locked"] += c_stats["locked"]
             overall_alignment_stats["fallback"] += c_stats["fallback"]
             overall_alignment_stats["fallback_indices"].extend(c_stats["fallback_indices"])
+            overall_alignment_stats["interpolated"] += c_stats.get("interpolated", 0)
         else:
             realigned_chunk = c_text
         realigned_chunks.append(realigned_chunk)

@@ -21,6 +21,8 @@ from generate_subtitles import (
     extract_whisper_prompt,
     extract_global_glossary,
     split_blocks_into_semantic_chunks,
+    normalize_text_for_alignment,
+    align_split_clauses_with_words,
     clean_subtitle_text,
     calc_display_width,
     split_long_clause,
@@ -90,9 +92,60 @@ class TestGenerateSubtitles(unittest.TestCase):
         cleaned_cjk = clean_subtitle_text(raw_cjk, language="zh-TW")
         self.assertEqual(cleaned_cjk, "哈囉 大家好 歡迎收看 AI 101 節目")
 
+        # Preserve thousand separators, decimals, %, and $ with clean CJK spacing
+        raw_num = "今年營收成長25.8%，投入$1,000購買設備。"
+        cleaned_num = clean_subtitle_text(raw_num, language="zh-TW")
+        self.assertEqual(cleaned_num, "今年營收成長 25.8% 投入 $1,000 購買設備")
+
         raw_en = "**Hello**, everyone, welcome to the show."
         cleaned_en = clean_subtitle_text(raw_en, language="en")
         self.assertEqual(cleaned_en, "Hello, everyone, welcome to the show.")
+
+    def test_normalize_text_for_alignment_multilingual_numbers_and_symbols(self):
+        # Chinese percentages, decimals, years, currencies, and thousand separators
+        self.assertEqual(
+            normalize_text_for_alignment("成長了百分之二十五點八"),
+            normalize_text_for_alignment("成長了 25.8%"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("Gemini 三點八"),
+            normalize_text_for_alignment("Gemini 3.8"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("兩千零二十六年"),
+            normalize_text_for_alignment("2026 年"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("花了 100 美金"),
+            normalize_text_for_alignment("花了 $100"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("預算 1,000 萬"),
+            normalize_text_for_alignment("預算一千萬"),
+        )
+        # Japanese
+        self.assertEqual(
+            normalize_text_for_alignment("三点五パーセント"),
+            normalize_text_for_alignment("3.5%"),
+        )
+        # Korean
+        self.assertEqual(
+            normalize_text_for_alignment("삼점팔 퍼센트"),
+            normalize_text_for_alignment("3.8%"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("이십오 프로"),
+            normalize_text_for_alignment("25%"),
+        )
+        # English
+        self.assertEqual(
+            normalize_text_for_alignment("twenty-five percent"),
+            normalize_text_for_alignment("25%"),
+        )
+        self.assertEqual(
+            normalize_text_for_alignment("three point eight"),
+            normalize_text_for_alignment("3.8"),
+        )
 
     def test_split_long_clause_cjk(self):
         long_line = "今天我們要一起來深入探討雲端人工智慧模型的最新發展趨勢"
@@ -103,6 +156,21 @@ class TestGenerateSubtitles(unittest.TestCase):
         self.assertEqual(len(parts_spaced), 2)
         for p in parts_spaced:
             self.assertLessEqual(calc_display_width(p, "zh-TW"), 14.0)
+
+    def test_align_split_clauses_with_words_fuzzy_typo_and_pause(self):
+        # Whisper had a homophone typo ("探逃" instead of "探討") and a 0.5s pause at 2.20s..2.70s
+        words = [
+            {"word": "今天", "start": 1.00, "end": 1.40},
+            {"word": "我們", "start": 1.40, "end": 1.80},
+            {"word": "探逃", "start": 1.80, "end": 2.20},
+            {"word": "雲端", "start": 2.70, "end": 3.10},
+            {"word": "架構", "start": 3.10, "end": 3.60},
+        ]
+        parts = ["今天我們探討", "雲端架構"]
+        aligned = align_split_clauses_with_words(parts, 1.00, 3.60, all_words=words)
+        self.assertEqual(len(aligned), 2)
+        self.assertAlmostEqual(aligned[0]["end"], 2.20, places=2)
+        self.assertAlmostEqual(aligned[1]["start"], 2.70, places=2)
 
     def test_split_blocks_into_semantic_chunks(self):
         blocks = []
@@ -148,6 +216,32 @@ class TestGenerateSubtitles(unittest.TestCase):
         self.assertEqual(metrics["agent_verdict"]["suggested_action"], "DELIVER")
         self.assertIn("YouTube / Netflix Subtitle Quality Audit Report", md_report)
 
+    def test_realign_spoken_numbers_and_global_milestone_recovery(self):
+        # Whisper has spoken numbers ("百分之", "二十五點八") AND a 50-char unkept filler block in the middle
+        words = [
+            {"word": "業績", "start": 1.00, "end": 1.40},
+            {"word": "成長", "start": 1.40, "end": 1.80},
+            {"word": "百分之", "start": 1.80, "end": 2.20},
+            {"word": "二十五點八", "start": 2.20, "end": 2.90},
+            {"word": "那那那其實這裡有一段超過五十個字元的無意義冗長口吃與重複廢話測試片段完全被校對刪除掉的內容再加一些廢話湊滿長度", "start": 3.00, "end": 6.50},
+            {"word": "最後", "start": 7.00, "end": 7.40},
+            {"word": "圓滿", "start": 7.40, "end": 7.80},
+            {"word": "成功", "start": 7.80, "end": 8.30},
+        ]
+        raw_srt = (
+            "1\n00:00:01,000 --> 00:00:03,000\n業績成長 25.8%\n\n"
+            "2\n00:00:06,800 --> 00:00:08,500\n最後圓滿成功\n"
+        )
+        realigned, stats = realign_subtitles_to_words(raw_srt, words, language="zh-TW", is_video_start=True)
+        self.assertEqual(stats["total"], 2)
+        self.assertEqual(stats["locked"], 2)
+        blocks = [b.strip() for b in realigned.strip().split("\n\n") if b.strip()]
+        l1_s, l1_e = [parse_timestamp_str(x) for x in blocks[0].splitlines()[1].split("-->")]
+        l2_s, l2_e = [parse_timestamp_str(x) for x in blocks[1].splitlines()[1].split("-->")]
+        self.assertAlmostEqual(l1_e, 2.90, places=2)
+        self.assertAlmostEqual(l2_s, 6.82, places=2)
+        self.assertAlmostEqual(l2_e, 8.30, places=2)
+
     def test_realign_non_cascading_fallback_recovery_and_source_bounds(self):
         words = [
             {"word": "歡迎", "start": 1.00, "end": 1.40},
@@ -161,7 +255,8 @@ class TestGenerateSubtitles(unittest.TestCase):
             {"word": "大家", "start": 4.50, "end": 5.00},
         ]
         # Line 2 is completely mismatched with an inflated fallback timestamp (up to 9.0s),
-        # but Line 3 ("謝謝大家") should recover and lock to 4.00s..5.00s without cascading!
+        # but BBC Pass 2 interpolates it onto the unconsumed Whisper words (2.70s..3.80s),
+        # and Line 3 ("謝謝大家") locks to 4.00s..5.00s without cascading!
         raw_srt = (
             "1\n00:00:01,000 --> 00:00:02,600\n歡迎收看今天節目\n\n"
             "2\n00:00:02,700 --> 00:00:09,000\n完全不相關的測試語句\n\n"
@@ -178,8 +273,13 @@ class TestGenerateSubtitles(unittest.TestCase):
         self.assertEqual(stats["locked"], 2)
         self.assertEqual(stats["fallback"], 1)
         self.assertEqual(stats["fallback_indices"], [2])
+        self.assertEqual(stats["interpolated"], 1)
 
         blocks = [b.strip() for b in realigned.strip().split("\n\n") if b.strip()]
+        line2_ts = blocks[1].splitlines()[1]
+        l2_start, l2_end = [parse_timestamp_str(x) for x in line2_ts.split("-->")]
+        self.assertAlmostEqual(l2_end, 3.80, places=2)
+
         line3_ts = blocks[2].splitlines()[1]
         l3_start, l3_end = [parse_timestamp_str(x) for x in line3_ts.split("-->")]
         # Line 3 must lock around 3.82s..5.00s and never drift to 9.00s
@@ -250,3 +350,4 @@ class TestGenerateSubtitles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
