@@ -154,7 +154,10 @@ flowchart TD
 - **输出目录自动隔离（`<input_dir>/output/`）**：系统默认将所有最终与中间产物保存在 `<input_dir>/output/` 子目录中（若输入文件已位于 `output/` 目录则直接复用，避免嵌套 `output/output/`）。
 1. **Stage 1（Vertex AI 1M 全局术语表与 Whisper 初始提示词 — 严格 Fail-Fast）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 $\le 145$ 字符的 Whisper 引导词；遇到云端异常立即以退出码 `1` 终止并输出修复指引。
 2. **Stage 2（Whisper 毫秒级逐词时间戳 — 默认 `small` 模型）**：默认采用 Whisper `small` 模型运行 `mlx-whisper` 或 `faster-whisper`（`word_timestamps=True`），提取高精度物理词级时间戳并缓存至 `<basename>_words.json`。
-3. **Stage 3（静音感知分块、防级联漂移重投影与 `agent_verdict` 质量门禁）**：在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表进行校对；通过双向弹性字符窗口（`cur_char_idx - 15` 回溯）、保守回退推进（`+ L` 字符）、重同步锚点与 `source_bounds` 边界约束消除级联时间漂移，保留语音结束后的 $+0.4\text{s}$ 阅读缓冲（上限 `media_duration + 0.4s`），并在 `<basename>_subtitle_report.json` 顶层输出 `agent_verdict` 质量门禁（未通过门禁时由 Agent 执行最多 1 次自动修复重试）。
+3. **Stage 3（静音感知分块、多阶段防级联漂移重投影与 `agent_verdict` 质量门禁）**：
+   - 在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表进行同音字与术语校对。
+   - **多阶段防漂移声学重投影（`realign_subtitles_to_words`）与均衡断句（`sanitize_subtitle_timings`）**：支持中、日、韩、英口语数字、小数点（`.`）、百分比（`%`）、货币（`$`）与千分位（`,`）双向归一化对齐，并自动收敛停顿后被 Whisper 异常拉长的首词起点（`_clamp_inflated_word_onset`）；通过分块级 `difflib` 全局里程碑锚定、双向弹性字符窗口（`cur_char_idx - 15` 回溯）与前后锚点有界插值消除级联时间漂移；采用 3 层动态规划（3-Tier DP）均衡切分超长句（消除孤儿短尾），结合编辑距离与停顿加权对齐子句，并按阅读速度（CPS）在停顿处动态延伸 $+0.4\text{s}\text{–}1.1\text{s}$ 阅读缓冲（片尾上限 `media_duration + 0.4s`）。
+   - 在 `<basename>_subtitle_report.json` 顶层输出 `agent_verdict` 质量门禁（未通过门禁时由 Agent 执行最多 1 次自动修复重试）。
 
 ---
 

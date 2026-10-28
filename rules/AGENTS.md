@@ -27,5 +27,5 @@ When you execute tasks or skills from this plugin, you MUST follow these operati
 
 ## 4. Acoustic Ground Truth & Three-Stage Pipeline Integrity
 - Execute the 3-Stage Golden Pipeline (`Stage 1: Global Glossary` -> `Stage 2: Whisper Word Timestamps (default: small)` -> `Stage 3: Multimodal Audio Proofreading & Non-Cascading Acoustic Re-Projection`) via `generate_subtitles.py` as defined in `skills/subtitle-craft/SKILL.md`.
-- All subtitle timestamps must respect Whisper word-level acoustic ground truth (`word_timestamps=True`), monotonic forward alignment, and broadcast pacing rules ($1.0\text{s}\text{–}6.0\text{s}$ duration, $+0.4\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging).
+- All subtitle timestamps must respect Whisper word-level acoustic ground truth (`word_timestamps=True`), post-silence onset clamping, multi-pass milestone-guided alignment, 3-tier balanced DP clause splitting, and broadcast pacing rules ($1.0\text{s}\text{–}6.0\text{s}$ duration, CPS-aware $+0.4\text{s}\text{–}1.1\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging).
 - Never use legacy AI Studio API keys (`GEMINI_API_KEY`).

@@ -185,7 +185,10 @@ flowchart TD
 2. **Stage 2（Whisper 毫秒級逐字聲學時間戳 — 預設 `small` 模型）**：預設採用 Whisper `small` 模型執行 `mlx-whisper`（Apple Silicon Metal 加速）或 `faster-whisper`（`word_timestamps=True`），提取高精準度物理字詞邊界並快取為 `<basename>_raw_whisper.srt` 與 `<basename>_words.json`。
 3. **Stage 3（靜音感知分塊、非連鎖防漂移聲學重投影與 `agent_verdict` 品質閘門）**：
    - 於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字（雲端錯誤立即取消佇列並以狀態碼 `1` 終止）。
-   - **非連鎖防漂移重投影（`realign_subtitles_to_words`）**：採用雙向彈性字元搜尋視窗（`cur_char_idx - 15` 回溯容錯）、保守退避推進（`+ L` 字元）、重同步錨點（`cur_char_idx = m_end + 1`）與 `source_bounds` 邊界夾制，確保單行退避絕不引發後續字幕連鎖時間漂移；並於語音結束後保留 $+0.4\text{s}$ 閱讀尾韻緩衝（上限鎖定於 `media_duration + 0.4s`）。
+   - **多階段防漂移聲學重投影（`realign_subtitles_to_words`）與均衡斷句（`sanitize_subtitle_timings`）**：
+     - **多語系口語數詞正規化與停頓後首字收斂**：支援中、日、韓、英口語數字、小數點（`.`）、百分比（`%`）、貨幣（`$`）與千分位（`,`）雙向正規化對齊，並自動收斂停頓後被 Whisper 異常拉長的首字起點（`_clamp_inflated_word_onset`），消除靜音區提前跳字。
+     - **全域里程碑錨定與雙向鄰居有界內插**：透過區塊級 `difflib` 全域匹配里程碑引導搜尋視窗（`cur_char_idx - 15` 回溯），並將未鎖定行按字數比例內插至前後鎖定行之間尚未消耗的 Whisper 字元時間軸，杜絕連鎖時間漂移。
+     - **三階層動態規劃均衡斷句與 CPS 感知動態尾韻**：以 3-Tier DP 成本函數切分超長句（消除左重右輕的孤兒短句），結合編輯距離與停頓加權對齊子句（`align_split_clauses_with_words`），並依閱讀速率（CPS）於停頓處動態延展 $+0.4\text{s}\text{–}1.1\text{s}$ 閱讀尾韻（片尾上限鎖定於 `media_duration + 0.4s`）。
    - **8 維度串流品質審核與 `agent_verdict` 機器可讀閘門**：於 `<basename>_subtitle_report.json` 頂層寫入 `agent_verdict`（檢核 `acoustic_lock_rate_pct >= 80.0%`、`last_out_vs_duration_diff_sec <= 0.5s` 與零重疊）。若未通過品質閘門，AI Agent 會自動執行最多 1 次自我修復重試。
 
 ---

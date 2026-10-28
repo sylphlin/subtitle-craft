@@ -154,7 +154,10 @@ Antigravity では以下の 2 つの方法で実行できます：
 - **出力ディレクトリの自動分離（`<input_dir>/output/`）**：すべての成果物およびキャッシュファイルはデフォルトで `<input_dir>/output/` に出力されます（入力元がすでに `output/` の場合はネストせずそのまま再利用します）。
 1. **Stage 1（Vertex AI 1M グローバル用語集＆Whisper 初期プロンプト抽出 — 厳格な Fail-Fast）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と Whisper 初期プロンプトを生成します。クラウドエラー発生時は即座に終了コード `1` で停止します。
 2. **Stage 2（Whisper 単語レベル音響グラウンドトゥルース — デフォルト `small` モデル）**：Whisper `small` モデルをデフォルトとして `mlx-whisper` または `faster-whisper`（`word_timestamps=True`）を実行し、高精度な単語境界を `<basename>_words.json` にキャッシュします。
-3. **Stage 3（無音認識チャンキング、非カスケード再投影＆`agent_verdict` 品質ゲート）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割して同音異義語を校正した後、双方向弾性ウィンドウ（`cur_char_idx - 15`）、保守的フォールバック進行（`+ L` 文字）、再同期アンカー、および `source_bounds` 境界制限によって連鎖的なタイムスタンプずれを防止します（発話終了後の $+0.4\text{s}$ 読み取りバッファを維持しつつ `media_duration + 0.4s` で上限保護）。`<basename>_subtitle_report.json` の最上位に `agent_verdict` を出力し、品質ゲート未達時は Agent が最大 1 回の自動修復リトライを実行します。
+3. **Stage 3（無音認識チャンキング、マルチパス非カスケード再投影＆`agent_verdict` 品質ゲート）**：
+   - 自然な息継ぎ（$\ge 0.4\text{s}$）で分割し、音声チャンクとグローバル用語集を参照して同音異義語を校正します。
+   - **マルチパス音響再投影（`realign_subtitles_to_words`）と均衡分割（`sanitize_subtitle_timings`）**：日中韓英の口語数値、小数点（`.`）、パーセント（`%`）、通貨記号（`$`）、桁区切り（`,`）を正規化し、無音直後に Whisper が過大評価した先頭単語の開始時刻を自動クランプ（`_clamp_inflated_word_onset`）します。チャンク全体の `difflib` マイルストーン誘導、双方向弾性ウィンドウ（`cur_char_idx - 15`）、および前後アンカー間の未消費文字への境界付き補間によって連鎖的なタイムスタンプずれを防止します。また、3 階層動的計画法（3-Tier DP）で長文を視覚的にバランス良く分割（孤立した短い末尾を防止）し、編集距離＋ポーズ重み付けでサブ句を単語境界に固定した上で、CPS に応じて $+0.4\text{s}\text{–}1.1\text{s}$ の適応型読み取りバッファを付与します（末尾上限は `media_duration + 0.4s`）。
+   - `<basename>_subtitle_report.json` の最上位に `agent_verdict` を出力し、品質ゲート未達時は Agent が最大 1 回の自動修復リトライを実行します。
 
 ---
 

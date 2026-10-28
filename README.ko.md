@@ -154,7 +154,10 @@ Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
 - **출력 디렉터리 자동 분리 (`<input_dir>/output/`)**: 모든 산출물과 캐시 파일은 기본적으로 `<input_dir>/output/` 하위 폴더에 저장됩니다(입력 경로가 이미 `output/`인 경우 중첩 없이 그대로 재사용합니다).
 1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트 — 엄격한 Fail-Fast)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출하며, 클라우드 오류 발생 시 즉시 종료 코드 `1`로 중단합니다.
 2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프 — 기본값 `small` 모델)**: 기본 Whisper `small` 모델로 `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 고정밀 단어 경계를 `<basename>_words.json`에 캐시합니다.
-3. **Stage 3 (무음 인식 청킹, 비연쇄 재투영 및 `agent_verdict` 품질 게이트)**: 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하여 동음이의어를 교정한 뒤, 양방향 탄성 탐색 윈도우(`cur_char_idx - 15`), 보수적 폴백 진행(`+ L` 글자), 재동기화 앵커 및 `source_bounds` 경계 제한을 통해 연쇄적인 타임스탬프 밀림 현상을 방지합니다(발화 종료 후 $+0.4\text{s}$ 읽기 버퍼를 유지하면서 `media_duration + 0.4s`로 상한 보호). `<basename>_subtitle_report.json` 최상위에 `agent_verdict`를 기록하며 품질 게이트 미달 시 Agent가 최대 1회 자동 복구 재시도를 수행합니다.
+3. **Stage 3 (무음 인식 청킹, 다단계 비연쇄 재투영 및 `agent_verdict` 품질 게이트)**:
+   - 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하여 오디오 청크와 글로벌 용어집을 바탕으로 동음이의어를 교정합니다.
+   - **다단계 음향 재투영(`realign_subtitles_to_words`) 및 균형 분할(`sanitize_subtitle_timings`)**: 한·중·일·영 구어 수사, 소수점(`.`), 퍼센트(`%`), 통화 기호(`$`), 천 단위 구분 기호(`,`)를 정규화하고, 무음 직후 Whisper가 과도하게 늘린 첫 단어 시작 시점을 자동 보정(`_clamp_inflated_word_onset`)합니다. 청크 단위 글로벌 `difflib` 마일스톤 시딩, 양방향 탄성 탐색 윈도우(`cur_char_idx - 15`), 전후 앵커 사이의 미소비 글자에 대한 경계 보간을 통해 연쇄적인 타임스탬프 밀림을 방지합니다. 또한 3단계 동적 계획법(3-Tier DP)으로 긴 문장을 균형 있게 분할(짧은 고아 꼬리 방지)하고, 편집 거리 및 휴지 가중치로 하위 절을 단어 경계에 고정하며, 읽기 속도(CPS)에 따라 $+0.4\text{s}\text{–}1.1\text{s}$의 적응형 읽기 버퍼를 부여합니다(상한 `media_duration + 0.4s`).
+   - `<basename>_subtitle_report.json` 최상위에 `agent_verdict`를 기록하며 품질 게이트 미달 시 Agent가 최대 1회 자동 복구 재시도를 수행합니다.
 
 ---
 
