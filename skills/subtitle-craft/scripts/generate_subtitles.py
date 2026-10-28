@@ -892,17 +892,53 @@ def normalize_text_for_alignment(text):
     return "".join(it["char"] for it in norm_items)
 
 
+def _clamp_inflated_word_onset(w_raw, w_start, w_end, prev_end=None):
+    """
+    Clamp inflated Whisper word start timestamps after silence pauses (inspired by stable-ts).
+    Whisper cross-attention DTW often bundles preceding silence or breath into the first word's start time.
+    """
+    w_dur = max(0.01, w_end - w_start)
+    clean_w = re.sub(
+        r"[\s,\?!，。？！、：:;；—\-~\"'「」『』“”‘’【】《》〈〉…·]+",
+        "",
+        str(w_raw),
+    )
+    if not clean_w:
+        return w_start, w_end
+
+    cjk_count = sum(1.0 for c in clean_w if ord(c) > 127)
+    ascii_count = sum(1.0 for c in clean_w if ord(c) <= 127)
+    n_units = max(1.0, cjk_count + (ascii_count / 3.0))
+    gap_before = (w_start - prev_end) if prev_end is not None else 999.0
+
+    if gap_before >= 0.30:
+        max_plausible_dur = 0.45 * n_units + 0.25
+        if w_dur > max_plausible_dur:
+            target_dur = 0.30 * n_units + 0.15
+            w_start = max(w_start, w_end - target_dur)
+    else:
+        max_internal_dur = 0.65 * n_units + 0.50
+        if w_dur > max_internal_dur:
+            target_dur = 0.35 * n_units + 0.20
+            w_start = max(w_start, w_end - target_dur)
+
+    return w_start, w_end
+
+
 def _build_normalized_char_timeline(all_words):
-    """Build a normalized character timeline from Whisper word objects while preserving acoustic boundaries."""
+    """Build a normalized character timeline from Whisper word objects while clamping inflated post-silence onsets."""
     if not all_words:
         return []
     raw_items = []
+    prev_end = None
     for idx, w in enumerate(all_words):
         w_raw = str(w.get("word", ""))
         if not w_raw:
             continue
-        w_start = float(w.get("start", 0.0))
-        w_end = float(w.get("end", w_start + 0.1))
+        raw_start = float(w.get("start", 0.0))
+        raw_end = float(w.get("end", raw_start + 0.1))
+        w_start, w_end = _clamp_inflated_word_onset(w_raw, raw_start, raw_end, prev_end=prev_end)
+        prev_end = raw_end
         w_dur = max(0.01, w_end - w_start)
         c_dur = w_dur / max(1, len(w_raw))
         for c_idx, ch in enumerate(w_raw):
@@ -1148,53 +1184,143 @@ def calc_display_width(text, norm_lang="zh-TW"):
         return float(len(text))
 
 
+_CJK_PAUSE_AFTER_CHARS = set("的了著過呢吧啊嗎後時中上下裡內外之")
+_CJK_BREAK_BEFORE_PREFIXES = (
+    "我們", "你們", "他們", "同時", "因為", "所以", "如果", "雖然", "但是", "而且",
+    "不過", "透過", "關於", "針對", "可以", "能夠", "正在", "已經", "深入", "一起",
+    "雲端", "人工", "系統", "模型", "未來", "現在", "目前", "如何", "為什麼",
+    "そして", "しかし", "また", "ただし", "그리고", "하지만", "또한",
+)
+
+
+def _partition_tokens_balanced(tokens, joiner, max_w, norm_lang, syntactic_bonus=False):
+    """
+    Partition tokens into contiguous balanced segments <= max_w using dynamic programming.
+    Minimizes segment count first, then minimizes length variance and penalizes short orphan tails.
+    """
+    import math
+
+    n = len(tokens)
+    if n == 0:
+        return []
+    if n == 1:
+        return [tokens[0]]
+
+    full_str = joiner.join(tokens)
+    total_w = calc_display_width(full_str, norm_lang)
+    if total_w <= max_w:
+        return [full_str]
+
+    target_k = max(2, int(math.ceil(total_w / max_w)))
+    ideal_w = total_w / target_k
+    min_orphan_w = min(3.5, ideal_w * 0.55) if norm_lang in ["zh-TW", "zh-CN", "ja", "ko"] else min(10.0, ideal_w * 0.50)
+
+    # dp[i] = (min_cost, split_index_j) for partitioning tokens[i:]
+    dp_cost = [float("inf")] * (n + 1)
+    dp_next = [n] * (n + 1)
+    dp_cost[n] = 0.0
+
+    for i in range(n - 1, -1, -1):
+        for j in range(i + 1, n + 1):
+            seg_str = joiner.join(tokens[i:j])
+            seg_w = calc_display_width(seg_str, norm_lang)
+            if j > i + 1 and seg_w > max_w:
+                break
+
+            # Base segment penalty prioritizes minimum number of segments
+            cost = 120.0 + (seg_w - ideal_w) ** 2
+            if seg_w > max_w:
+                cost += 500.0 + (seg_w - max_w) * 50.0
+            if seg_w < min_orphan_w:
+                cost += 45.0
+
+            if syntactic_bonus and j < n:
+                left_tok = tokens[j - 1].strip()
+                right_tail = "".join(tokens[j : min(n, j + 3)]).strip()
+                if left_tok and left_tok[-1] in _CJK_PAUSE_AFTER_CHARS:
+                    cost -= 3.5
+                if any(right_tail.startswith(pref) for pref in _CJK_BREAK_BEFORE_PREFIXES):
+                    cost -= 4.0
+
+            total_cand_cost = cost + dp_cost[j]
+            if total_cand_cost < dp_cost[i]:
+                dp_cost[i] = total_cand_cost
+                dp_next[i] = j
+
+    segments = []
+    cur = 0
+    while cur < n:
+        nxt = dp_next[cur]
+        if nxt <= cur:
+            nxt = cur + 1
+        segments.append(joiner.join(tokens[cur:nxt]))
+        cur = nxt
+    return segments
+
+
+def _tokenize_atomic_units(text):
+    """Tokenize a string into indivisible lexical atoms (preserving ASCII words, numbers, decimals, and currencies)."""
+    pattern = (
+        r"[$¥€£₩]?[A-Za-z0-9]+(?:[.,:/\-][A-Za-z0-9]+)*[%°℃+]?\s*"
+        r"|[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u30ff\uac00-\ud7af][。，、？！；：」』）》]*"
+        r"|[^\s]"
+    )
+    atoms = [m.group(0) for m in re.finditer(pattern, text)]
+    return atoms if atoms else [text]
+
+
 def split_long_clause(text, max_w=15.0, norm_lang="zh-TW"):
-    """Split a clause exceeding max_w into natural sub-clauses without breaking numeric thousand separators."""
+    """
+    Split a clause exceeding max_w into balanced sub-clauses using a 3-tier DP cost function:
+      - Tier 1: Balanced partition across space-delimited phrase boundaries.
+      - Tier 2: Balanced partition across inline punctuation boundaries (preserving numeric thousand separators).
+      - Tier 3: Balanced partition across atomic lexical units with syntactic boundary bonuses.
+    """
     w = calc_display_width(text, norm_lang)
     if w <= max_w:
-        return [clean_subtitle_text(text, language=norm_lang)]
+        cleaned = clean_subtitle_text(text, language=norm_lang)
+        return [cleaned] if cleaned else []
 
-    parts = [p.strip() for p in text.split(" ") if p.strip()]
-    if len(parts) > 1:
-        chunks = []
-        cur = []
-        for p in parts:
-            cand = " ".join(cur + [p])
-            if cur and calc_display_width(cand, norm_lang) > max_w:
-                cleaned_c = clean_subtitle_text(" ".join(cur), language=norm_lang)
-                if cleaned_c:
-                    chunks.append(cleaned_c)
-                cur = [p]
-            else:
-                cur.append(p)
-        if cur:
-            cleaned_c = clean_subtitle_text(" ".join(cur), language=norm_lang)
-            if cleaned_c:
-                chunks.append(cleaned_c)
-        if len(chunks) > 1:
-            return chunks
+    # Tier 1: Space-delimited phrase tokens
+    space_parts = [p.strip() for p in text.split(" ") if p.strip()]
+    if len(space_parts) > 1:
+        tier1_segs = _partition_tokens_balanced(space_parts, " ", max_w, norm_lang, syntactic_bonus=False)
+    else:
+        tier1_segs = [text.strip()]
 
-    sub_parts = [p.strip() for p in re.split(r"(?<=[、，])|(?<!\d),(?!\d)", text) if p.strip()]
-    if len(sub_parts) > 1:
-        chunks = []
-        cur = []
-        for p in sub_parts:
-            cand = "".join(cur + [p])
-            if cur and calc_display_width(cand, norm_lang) > max_w:
-                cleaned_c = clean_subtitle_text("".join(cur), language=norm_lang)
-                if cleaned_c:
-                    chunks.append(cleaned_c)
-                cur = [p]
-            else:
-                cur.append(p)
-        if cur:
-            cleaned_c = clean_subtitle_text("".join(cur), language=norm_lang)
-            if cleaned_c:
-                chunks.append(cleaned_c)
-        if len(chunks) > 1:
-            return chunks
+    # Tier 2: Inline punctuation tokens for any segment still exceeding max_w
+    tier2_segs = []
+    for seg in tier1_segs:
+        if calc_display_width(seg, norm_lang) <= max_w:
+            tier2_segs.append(seg)
+            continue
+        punct_parts = [p.strip() for p in re.split(r"(?<=[、，；;：:])|(?<!\d),(?!\d)", seg) if p.strip()]
+        if len(punct_parts) > 1:
+            tier2_segs.extend(_partition_tokens_balanced(punct_parts, "", max_w, norm_lang, syntactic_bonus=False))
+        else:
+            tier2_segs.append(seg)
 
-    return [clean_subtitle_text(text, language=norm_lang)]
+    # Tier 3: Atomic lexical units for any unpunctuated segment still exceeding max_w
+    final_clauses = []
+    for seg in tier2_segs:
+        if calc_display_width(seg, norm_lang) <= max_w:
+            cleaned = clean_subtitle_text(seg, language=norm_lang)
+            if cleaned:
+                final_clauses.append(cleaned)
+            continue
+        atoms = _tokenize_atomic_units(seg)
+        if len(atoms) > 1:
+            atom_segs = _partition_tokens_balanced(atoms, "", max_w, norm_lang, syntactic_bonus=True)
+            for a_seg in atom_segs:
+                cleaned = clean_subtitle_text(a_seg, language=norm_lang)
+                if cleaned:
+                    final_clauses.append(cleaned)
+        else:
+            cleaned = clean_subtitle_text(seg, language=norm_lang)
+            if cleaned:
+                final_clauses.append(cleaned)
+
+    return final_clauses if final_clauses else [clean_subtitle_text(text, language=norm_lang)]
 
 
 def score_candidate(cand_str, clean_t):
@@ -1511,19 +1637,22 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
     """
     Sanitize subtitle timings and pacing:
       1. Enforce monotonic forward alignment without overlaps.
-      2. Extend post-tail reading buffer (+0.4s) into natural pauses.
+      2. Extend CPS-aware adaptive post-tail reading buffer (+0.4s to +1.1s) into natural pauses.
       3. Enforce min duration (>= 1.0s) and max duration (<= 6.0s) bounds.
       4. Bridge micro-gaps (< 0.2s) to prevent visual flicker.
-      5. Split overlength clauses and anchor them to word timestamps.
+      5. Split overlength clauses with balanced DP and anchor them to word timestamps.
       6. Cap subtitle end times at media_duration + post_tail_buffer when media_duration is supplied.
     """
     norm_lang = normalize_language_tag(language)
     if norm_lang in ["zh-TW", "zh-CN", "ja"]:
         max_w = float(max_chars_cjk)
+        comfortable_cps = 5.5
     elif norm_lang == "ko":
         max_w = float(max_chars_korean)
+        comfortable_cps = 6.0
     else:
         max_w = float(max_chars_latin)
+        comfortable_cps = 16.0
 
     blocks = [b.strip() for b in raw_srt.strip().split("\n\n") if b.strip()]
     items = []
@@ -1591,16 +1720,25 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
         if cur["end"] <= cur["start"]:
             cur["end"] = cur["start"] + 1.0
 
+    max_adaptive_tail = max(post_tail_buffer, 1.10)
     for i in range(len(items)):
         cur = items[i]
         nxt_start = items[i + 1]["start"] if i + 1 < len(items) else (cur["end"] + 10.0)
 
+        spoken_dur = max(0.01, cur["end"] - cur["start"])
+        char_w = calc_display_width(cur["text"], norm_lang)
+        ideal_cps_dur = char_w / comfortable_cps
+        desired_tail = max(
+            post_tail_buffer,
+            min(max_adaptive_tail, ideal_cps_dur - spoken_dur),
+        )
+
         raw_gap = nxt_start - cur["end"]
-        if raw_gap < (post_tail_buffer + min_gap_threshold):
+        if raw_gap < (desired_tail + min_gap_threshold):
             if raw_gap > 0:
                 cur["end"] = nxt_start
         else:
-            cur["end"] = cur["end"] + post_tail_buffer
+            cur["end"] = cur["end"] + desired_tail
 
         dur = cur["end"] - cur["start"]
         if dur < min_duration:

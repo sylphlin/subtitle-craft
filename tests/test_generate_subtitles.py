@@ -148,14 +148,54 @@ class TestGenerateSubtitles(unittest.TestCase):
         )
 
     def test_split_long_clause_cjk(self):
+        # Tier 3: Unspaced 27-char CJK line is partitioned into 2 balanced clauses <= 15.0 chars
         long_line = "今天我們要一起來深入探討雲端人工智慧模型的最新發展趨勢"
         parts = split_long_clause(long_line, max_w=15.0, norm_lang="zh-TW")
-        self.assertGreaterEqual(len(parts), 1)
+        self.assertEqual(len(parts), 2)
+        for p in parts:
+            self.assertLessEqual(calc_display_width(p, "zh-TW"), 15.0)
+            self.assertGreaterEqual(calc_display_width(p, "zh-TW"), 10.0)
+
+        # Tier 1: Avoid greedy 14 + 4 orphan tail in favor of balanced 8 + 10 split
+        orphan_prone = "今天我們一起探討 雲端人工智慧 發展趨勢"
+        parts_balanced = split_long_clause(orphan_prone, max_w=15.0, norm_lang="zh-TW")
+        self.assertEqual(parts_balanced, ["今天我們一起探討", "雲端人工智慧 發展趨勢"])
+
         spaced_line = "今天我們要一起探討 雲端人工智慧模型的最新發展"
         parts_spaced = split_long_clause(spaced_line, max_w=14.0, norm_lang="zh-TW")
         self.assertEqual(len(parts_spaced), 2)
         for p in parts_spaced:
             self.assertLessEqual(calc_display_width(p, "zh-TW"), 14.0)
+
+    def test_clamp_inflated_post_silence_word_onset(self):
+        # Whisper inflated the first word "歡迎" across 2.3s of opening silence (0.10s..2.40s)
+        words = [
+            {"word": "歡迎", "start": 0.10, "end": 2.40},
+            {"word": "來到", "start": 2.40, "end": 2.80},
+            {"word": "現場", "start": 2.80, "end": 3.20},
+        ]
+        raw_srt = "1\n00:00:00,100 --> 00:00:03,200\n歡迎來到現場\n"
+        realigned, stats = realign_subtitles_to_words(raw_srt, words, language="zh-TW", is_video_start=True)
+        self.assertEqual(stats["locked"], 1)
+        ts_line = realigned.strip().splitlines()[1]
+        s_sec, e_sec = [parse_timestamp_str(x) for x in ts_line.split("-->")]
+        # Clamped onset (2.40 - 0.75 = 1.65s) minus 0.18s lead-in = 1.47s (never 0.00s!)
+        self.assertGreaterEqual(s_sec, 1.40)
+        self.assertAlmostEqual(e_sec, 3.20, places=2)
+
+    def test_sanitize_subtitle_timings_cps_aware_adaptive_tail(self):
+        # 12 CJK chars spoken rapidly in 1.10s (1.00s..2.10s), followed by a 2.50s silence gap before line 2 (4.60s)
+        fast_srt = (
+            "1\n00:00:01,000 --> 00:00:02,100\n今天我們一起深入探討雲端\n\n"
+            "2\n00:00:04,600 --> 00:00:06,200\n謝謝大家收看\n"
+        )
+        sanitized = sanitize_subtitle_timings(fast_srt, language="zh-TW", media_duration=6.50)
+        blocks = [b.strip() for b in sanitized.strip().split("\n\n") if b.strip()]
+        l1_s, l1_e = [parse_timestamp_str(x) for x in blocks[0].splitlines()[1].split("-->")]
+        l1_dur = l1_e - l1_s
+        # Instead of fixed +0.4s (1.50s -> 8.0 CPS), adaptive tail extends up to ~2.18s (<= 5.6 CPS)
+        self.assertGreaterEqual(l1_dur, 2.05)
+        self.assertLessEqual(12.0 / l1_dur, 6.0)
 
     def test_align_split_clauses_with_words_fuzzy_typo_and_pause(self):
         # Whisper had a homophone typo ("探逃" instead of "探討") and a 0.5s pause at 2.20s..2.70s
