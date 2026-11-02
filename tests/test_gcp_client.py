@@ -50,13 +50,17 @@ class TestGcpClient(unittest.TestCase):
             cli_bucket="gs://custom-bucket/",
             cli_location="global",
             cli_region="asia-east1",
+            cli_stt_location="eu",
         )
         self.assertEqual(cfg["project"], "custom-proj")
         self.assertEqual(cfg["bucket"], "custom-bucket")
         self.assertEqual(cfg["location"], "global")
         self.assertEqual(cfg["region"], "asia-east1")
+        self.assertEqual(cfg["stt_location"], "eu")
+        self.assertEqual(cfg["transcribe_model"], "chirp_3")
+        self.assertEqual(cfg["summary_model"], "gemini-3.8-flash")
 
-    @patch("modules.gcp_client._parse_env_file", return_value={})
+    @patch("modules.gcp_client._parse_env_file", return_value={"TRANSCRIBE_MODEL": "whisper-large"})
     @patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "auto-proj"}, clear=True)
     def test_resolve_gcp_config_deterministic_default_bucket(self, _mock_env):
         cfg = resolve_gcp_config()
@@ -64,6 +68,9 @@ class TestGcpClient(unittest.TestCase):
         self.assertEqual(cfg["bucket"], "subtitle-craft-auto-proj")
         self.assertEqual(cfg["location"], "global")
         self.assertEqual(cfg["region"], "us-central1")
+        self.assertEqual(cfg["stt_location"], "us")
+        self.assertEqual(cfg["transcribe_model"], "chirp_3")
+        self.assertEqual(cfg["summary_model"], "gemini-3.8-flash")
 
     def test_is_gdrive_source(self):
         self.assertTrue(is_gdrive_source("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing"))

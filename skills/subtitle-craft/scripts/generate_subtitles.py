@@ -1746,6 +1746,8 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
             room = nxt_start - cur["end"]
             if room > 0:
                 cur["end"] = min(cur["end"] + min(needed, room), nxt_start)
+                if 0 < (nxt_start - cur["end"]) < min_gap_threshold and (nxt_start - cur["start"]) <= max_duration:
+                    cur["end"] = nxt_start
 
         if cur["end"] - cur["start"] > max_duration:
             cur["end"] = cur["start"] + max_duration
@@ -2387,16 +2389,20 @@ YouTube / Netflix Subtitle Quality Audit Report
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Subtitle Craft: Global Audio Glossary + Whisper ASR + Vertex AI Audio Proofreading.",
+        description="Subtitle Craft: Global Audio Glossary + Dual-Engine Acoustic ASR + Vertex AI Audio Proofreading.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument("-i", "--input", required=True, help="Path or Google Drive URL to input video or audio file")
     parser.add_argument("-o", "--output-dir", default=None, help="Output directory for SRT/VTT subtitles (default: <input_dir>/output)")
     parser.add_argument("--outline", default=None, help="User interview outline, topic summary, or glossary notes to bias terminology")
     parser.add_argument("--script", default=None, help="Path to full recording script, manuscript, or spoken draft to anchor terminology")
+    parser.add_argument("--asr-engine", default="chirp3", choices=["chirp3", "whisper"],
+                        help="Stage 2 acoustic word-timestamp engine (default: chirp3)")
+    parser.add_argument("--stt-location", default=None,
+                        help="Cloud STT V2 location when --asr-engine=chirp3 (default: us)")
     parser.add_argument("--whisper-model", default="small", choices=["tiny", "base", "small", "medium", "large-v3"],
-                        help="Whisper model size for Stage 2 acoustic transcription (default: small)")
-    parser.add_argument("--model", default="gemini-3.8-flash",
+                        help="Whisper model size when --asr-engine=whisper (default: small)")
+    parser.add_argument("--model", default=None,
                         help="Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (default: gemini-3.8-flash)")
     parser.add_argument("--project", default=None,
                         help="Google Cloud Project ID for Vertex AI / GCS (or set GOOGLE_CLOUD_PROJECT in .env)")
@@ -2410,10 +2416,10 @@ def main():
                         help="Delete staged glossary audio from GCS immediately after completion (chunk audio is always auto-cleaned)")
     parser.add_argument("--language", default="auto", help="Spoken language code for transcription (default: auto, or zh-TW, en, ja, ko, zh-CN)")
     parser.add_argument("--device", default="auto", choices=["auto", "mps", "mlx", "cuda", "cpu"],
-                        help="Device acceleration backend for Whisper (default: auto for Apple Silicon GPU / Neural Engine)")
+                        help="Device acceleration backend when --asr-engine=whisper (default: auto)")
     parser.add_argument("--chunk-size", type=int, default=80, help="Subtitle entries per proofread batch (default: 80)")
     parser.add_argument("--workers", type=int, default=5, help="Concurrent workers for parallel proofreading (default: 5)")
-    parser.add_argument("--force", action="store_true", help="Force re-running Whisper transcription and Gemini proofreading")
+    parser.add_argument("--force", action="store_true", help="Force re-running Stage 2 ASR transcription and Stage 3 proofreading")
     parser.add_argument("--force-glossary", action="store_true", help="Force re-extracting global glossary from scratch")
     parser.add_argument("--strict", action="store_true",
                         help="Exit with code 2 if agent_verdict.pass_quality_gate is False")
@@ -2431,7 +2437,9 @@ def main():
         cli_bucket=args.gcs_bucket,
         cli_location=args.location,
         cli_region=args.region,
+        cli_stt_location=args.stt_location,
     )
+    args.model = args.model or gcp_cfg.get("summary_model") or "gemini-3.8-flash"
 
     if not gcp_cfg.get("project") or not gcp_cfg.get("bucket"):
         print("\n[Error] Missing Google Cloud Project ID or GCS Bucket for Vertex AI!", file=sys.stderr)
@@ -2480,7 +2488,7 @@ def main():
             user_script_text = f.read().strip()
 
     print("\n" + "=" * 78)
-    print("Subtitle Craft (Global Glossary + Whisper ASR + Vertex AI Audio Proofreading)")
+    print("Subtitle Craft (Global Glossary + Acoustic ASR + Vertex AI Audio Proofreading)")
     print("=" * 78)
     print(f"  • Input Media   : {args.input}")
     print(f"  • Output Dir    : {out_dir}")
@@ -2491,7 +2499,13 @@ def main():
         print(f"  • Source Script : {os.path.basename(args.script) if os.path.isfile(args.script) else 'Supplied text'} ({len(user_script_text or '')} chars)")
     if args.outline:
         print(f"  • User Outline  : {args.outline[:50]}...")
-    print(f"  • Whisper Model : {args.whisper_model} (Language: {args.language}, Device: {args.device})")
+    if args.asr_engine == "chirp3":
+        print(
+            f"  • Stage 2 ASR   : Google Cloud STT V2 {gcp_cfg.get('transcribe_model', 'chirp_3')} "
+            f"(Language: {args.language}, STT Location: {gcp_cfg.get('stt_location', 'us')})"
+        )
+    else:
+        print(f"  • Stage 2 ASR   : Whisper {args.whisper_model} (Language: {args.language}, Device: {args.device})")
     print(f"  • Batch Settings: Chunk {args.chunk_size} lines | {args.workers} Parallel Workers")
     print(f"  • Target SRT    : {final_srt_path}")
     print(f"  • Target VTT    : {final_vtt_path}")
@@ -2534,52 +2548,69 @@ def main():
                 print(f"  • Saved Global Glossary: {glossary_path}")
 
         whisper_bias_prompt = extract_whisper_prompt(global_glossary, language=args.language)
-        if whisper_bias_prompt:
+        if whisper_bias_prompt and args.asr_engine == "whisper":
             print(f"  • Extracted Whisper Initial Prompt ({len(whisper_bias_prompt)} chars):")
             print(f"    \"{whisper_bias_prompt}\"")
 
-        # Stage 2: Whisper Acoustic Transcription
-        raw_words_path = os.path.join(out_dir, f"{input_basename}_words.json")
-        if os.path.exists(raw_srt_path) and os.path.exists(raw_words_path) and not args.force:
-            print("\n[Stage 2/3] Found cached Whisper acoustic baseline:")
-            print(f"  • SRT: {raw_srt_path}")
-            print(f"  • Words JSON: {raw_words_path}")
-            try:
-                with open(raw_words_path, "r", encoding="utf-8") as f:
-                    cached = json.load(f)
-                segments = cached.get("segments", [])
-                all_words = cached.get("words", [])
-                detected_lang = cached.get("language", "zh")
-                with open(raw_srt_path, "r", encoding="utf-8") as f:
-                    raw_srt = f.read()
-                print(f"  ✓ Loaded {len(segments)} segments and {len(all_words)} word timestamps from cache.")
-            except Exception as e:
-                print(f"  [Notice] Failed to load cache ({e}), re-running Whisper transcription...")
-                segments, detected_lang, all_words = run_whisper_transcription(
-                    tmp_wav,
-                    model_size=args.whisper_model,
-                    language=args.language,
-                    device=args.device,
-                    initial_prompt=whisper_bias_prompt
-                )
-                raw_srt = build_srt_from_segments(segments)
-                with open(raw_srt_path, "w", encoding="utf-8") as f:
-                    f.write(raw_srt)
-                with open(raw_words_path, "w", encoding="utf-8") as f:
-                    json.dump({"language": detected_lang, "segments": segments, "words": all_words}, f, ensure_ascii=False)
-        else:
-            segments, detected_lang, all_words = run_whisper_transcription(
+        # Stage 2: Acoustic Word-Timestamp Transcription (Default: Cloud STT V2 Chirp 3; Optional: Whisper)
+        def _run_stage2_asr():
+            if args.asr_engine == "chirp3":
+                from modules.chirp3_asr import run_chirp3_transcription
+                try:
+                    return run_chirp3_transcription(
+                        tmp_wav,
+                        language=args.language,
+                        initial_prompt=whisper_bias_prompt,
+                        project=gcp_cfg.get("project"),
+                        gcs_bucket=gcp_cfg.get("bucket"),
+                        region=gcp_cfg.get("region"),
+                        stt_location=gcp_cfg.get("stt_location"),
+                        model_name=gcp_cfg.get("transcribe_model") or "chirp_3",
+                    )
+                except Exception as e:
+                    _abort_cloud_failure("Stage 2 Chirp 3 Transcription (Cloud STT V2)", e)
+            return run_whisper_transcription(
                 tmp_wav,
                 model_size=args.whisper_model,
                 language=args.language,
                 device=args.device,
-                initial_prompt=whisper_bias_prompt
+                initial_prompt=whisper_bias_prompt,
             )
+
+        raw_words_path = os.path.join(out_dir, f"{input_basename}_words.json")
+        cache_loaded = False
+        if os.path.exists(raw_srt_path) and os.path.exists(raw_words_path) and not args.force:
+            try:
+                with open(raw_words_path, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                cached_engine = cached.get("asr_engine", "whisper")
+                if cached_engine == args.asr_engine:
+                    print(f"\n[Stage 2/3] Found cached {args.asr_engine} acoustic baseline:")
+                    print(f"  • SRT: {raw_srt_path}")
+                    print(f"  • Words JSON: {raw_words_path}")
+                    segments = cached.get("segments", [])
+                    all_words = cached.get("words", [])
+                    detected_lang = cached.get("language", "zh")
+                    with open(raw_srt_path, "r", encoding="utf-8") as f:
+                        raw_srt = f.read()
+                    print(f"  ✓ Loaded {len(segments)} segments and {len(all_words)} word timestamps from cache.")
+                    cache_loaded = True
+                else:
+                    print(f"\n[Stage 2/3] Cached ASR engine '{cached_engine}' differs from requested '{args.asr_engine}', re-transcribing...")
+            except Exception as e:
+                print(f"  [Notice] Failed to load cache ({e}), re-running Stage 2 transcription...")
+
+        if not cache_loaded:
+            segments, detected_lang, all_words = _run_stage2_asr()
             raw_srt = build_srt_from_segments(segments)
             with open(raw_srt_path, "w", encoding="utf-8") as f:
                 f.write(raw_srt)
             with open(raw_words_path, "w", encoding="utf-8") as f:
-                json.dump({"language": detected_lang, "segments": segments, "words": all_words}, f, ensure_ascii=False)
+                json.dump(
+                    {"asr_engine": args.asr_engine, "language": detected_lang, "segments": segments, "words": all_words},
+                    f,
+                    ensure_ascii=False,
+                )
             print(f"  • Saved raw acoustic baseline: {raw_srt_path}")
 
         effective_lang = detected_lang if str(args.language).lower() in ("auto", "none") else args.language

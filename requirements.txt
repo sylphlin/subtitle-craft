@@ -1,12 +1,12 @@
-# Core Google Cloud & HTTP dependencies
+# Core Google Cloud (Vertex AI + Cloud STT V2 Chirp 3 + GCS) and HTTP dependencies
 google-genai>=0.1.1
 google-cloud-storage>=3.0.0
 google-auth>=2.0.0
 requests>=2.31.0
 
-# Whisper ASR backends (install at least one)
-# For macOS Apple Silicon (Metal GPU / Neural Engine acceleration):
+# Optional local Whisper ASR backends (used when local Whisper mode is requested)
+# macOS Apple Silicon (Metal GPU / Neural Engine acceleration):
 mlx-whisper>=0.4.0; sys_platform == 'darwin'
 
-# For CPU / CUDA / general platforms:
+# CPU / CUDA / general platforms:
 faster-whisper>=1.0.0

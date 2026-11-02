@@ -9,16 +9,17 @@ When you execute tasks or skills from this plugin, you MUST follow these operati
 - Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft`).
 - Set `Cwd` to `<PLUGIN_ROOT>` and run the official script (`python3 skills/subtitle-craft/scripts/generate_subtitles.py`) directly with `run_command` using the specified arguments. Do NOT search for global CLI aliases with `find_by_name` or `list_dir`.
 
-## 2. Fail-Fast on Cloud Errors, Quality Gate (`agent_verdict`), & One-Shot Self-Healing Protocol
+## 2. Explicit Engine Selection, Fail-Fast on Cloud Errors, Quality Gate (`agent_verdict`), & One-Shot Self-Healing
+- Always default to the primary Cloud Speech-to-Text V2 Chirp 3 engine (`--asr-engine chirp3`). Pass `--asr-engine whisper` ONLY when the user explicitly requests Whisper or local acoustic transcription in their prompt.
 - If a script fails with exit code `1` (such as 401 Unauthorized, 403 Forbidden, Quota Exceeded, missing Application Default Credentials, or missing FFmpeg):
-  - Stop immediately. Do NOT retry or fallback.
+  - Stop immediately. Do NOT retry or silently downgrade to `--asr-engine whisper`.
   - Show the exact error message and exit status to the user.
   - Give a clear, actionable solution to the user (for example, run `./setup.sh --project YOUR_PROJECT_ID`, run `gcloud auth application-default login`, or install FFmpeg).
   - Do NOT try to modify the script, probe different code paths, or rewrite logic.
 - After running `generate_subtitles.py`, verify that all required deliverable files (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) exist in the output directory (`<input_dir>/output/` by default) and are non-empty (`> 0 bytes`).
 - Inspect the top-level `agent_verdict` object in `<BASENAME>_subtitle_report.json`:
   - If `agent_verdict.pass_quality_gate` is `true` (`suggested_action == "DELIVER"`), deliver the final `.srt` and `.vtt` files to the user.
-  - **One-Shot Self-Healing Protocol (Max 1 Retry)**: If `agent_verdict.pass_quality_gate` is `false` (`suggested_action == "ONE_SHOT_REMEDIATE"`, or exit code `2` when `--strict` is enabled), you may execute **at most ONE** automated remediation re-run with `--whisper-model small --force`. If the second run still reports `pass_quality_gate: false`, stop immediately, report the `[Degraded]` status and `fatal_violations` to the user, and do NOT enter an infinite retry loop.
+  - **One-Shot Self-Healing Protocol (Max 1 Retry)**: If `agent_verdict.pass_quality_gate` is `false` (`suggested_action == "ONE_SHOT_REMEDIATE"`, or exit code `2` when `--strict` is enabled), you may execute **at most ONE** automated remediation re-run with `--force` (preserving the selected `--asr-engine`; include `--whisper-model small` when running Whisper). If the second run still reports `pass_quality_gate: false`, stop immediately, report the `[Degraded]` status and `fatal_violations` to the user, and do NOT enter an infinite retry loop.
 
 ## 3. Strict Zero-Emoji Policy in Technical Reports & Dynamic Language Mirroring
 - Do NOT use decorative emojis or icons in generated technical Subtitle Audit Markdown reports or headings.
@@ -26,6 +27,6 @@ When you execute tasks or skills from this plugin, you MUST follow these operati
 - Always respond to the user in their prompt language (Traditional Chinese `zh-TW` when prompted in Traditional Chinese, English when prompted in English, Japanese when prompted in Japanese, etc.) and pass the matching `--language` flag when specified.
 
 ## 4. Acoustic Ground Truth & Three-Stage Pipeline Integrity
-- Execute the 3-Stage Golden Pipeline (`Stage 1: Global Glossary` -> `Stage 2: Whisper Word Timestamps (default: small)` -> `Stage 3: Multimodal Audio Proofreading & Non-Cascading Acoustic Re-Projection`) via `generate_subtitles.py` as defined in `skills/subtitle-craft/SKILL.md`.
-- All subtitle timestamps must respect Whisper word-level acoustic ground truth (`word_timestamps=True`), post-silence onset clamping, multi-pass milestone-guided alignment, 3-tier balanced DP clause splitting, and broadcast pacing rules ($1.0\text{s}\text{–}6.0\text{s}$ duration, CPS-aware $+0.4\text{s}\text{–}1.1\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging).
+- Execute the 3-Stage Golden Pipeline (`Stage 1: Global Glossary` -> `Stage 2: Dual-Engine Word Timestamps (default: Cloud STT V2 Chirp 3; optional: Whisper)` -> `Stage 3: Multimodal Audio Proofreading & Non-Cascading Acoustic Re-Projection`) via `generate_subtitles.py` as defined in `skills/subtitle-craft/SKILL.md`.
+- All subtitle timestamps must respect physical word-level acoustic ground truth, post-silence onset clamping, multi-pass milestone-guided alignment, 3-tier balanced DP clause splitting, and broadcast pacing rules ($1.0\text{s}\text{–}6.0\text{s}$ duration, CPS-aware $+0.4\text{s}\text{–}1.1\text{s}$ post-tail reading buffer capped at `media_duration + 0.4s`, $<0.2\text{s}$ micro-gap bridging).
 - Never use legacy AI Studio API keys (`GEMINI_API_KEY`).

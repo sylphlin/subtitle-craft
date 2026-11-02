@@ -13,6 +13,7 @@
 #   -p, --project PROJECT_ID     Google Cloud Project ID (overrides .env / gcloud config)
 #   -r, --region REGION          Google Cloud Storage Region (default: us-central1)
 #   -l, --location LOCATION      Vertex AI Model Location (default: global)
+#   --stt-location LOCATION      Cloud STT V2 Chirp 3 Location (default: us)
 #   -b, --bucket BUCKET_NAME     Custom GCS bucket name (default: subtitle-craft-${PROJECT_ID})
 #   -s, --service-account SA     Optional custom service account email
 #   -n, --dry-run                Preview gcloud setup commands without executing
@@ -41,6 +42,9 @@ PROJECT_ID="${GCP_PROJECT:-${GOOGLE_CLOUD_PROJECT:-}}"
 PROJECT_NUMBER="${GCP_PROJECT_NUMBER:-${PROJECT_NUMBER:-}}"
 REGION="${GCP_REGION:-us-central1}"
 LOCATION="${GOOGLE_CLOUD_LOCATION:-global}"
+STT_LOCATION="${STT_LOCATION:-us}"
+TRANSCRIBE_MODEL="${TRANSCRIBE_MODEL:-chirp_3}"
+SUMMARY_MODEL="${SUMMARY_MODEL:-gemini-3.8-flash}"
 BUCKET_NAME="${SUBTITLE_CRAFT_BUCKET:-${GCS_BUCKET:-}}"
 SERVICE_ACCOUNT="${GCP_SERVICE_ACCOUNT:-${SERVICE_ACCOUNT:-}}"
 DRY_RUN=false
@@ -49,13 +53,16 @@ usage() {
     cat <<EOF
 Usage: ./setup.sh [OPTIONS]
 
-Provision Google Cloud Vertex AI & Cloud Storage (GCS) environment for
-Subtitle Craft (100% native gcloud + ADC).
+Provision Google Cloud Vertex AI, Cloud Speech-to-Text V2 (Chirp 3), & Cloud
+Storage (GCS) environment for Subtitle Craft (100% native gcloud + ADC).
 
 Environment Variables (.env or shell):
   GOOGLE_CLOUD_PROJECT / GCP_PROJECT  Target GCP Project ID
   GOOGLE_CLOUD_LOCATION               Vertex AI Gemini endpoint location (default: global)
   GCP_REGION                          GCS Bucket region (default: us-central1)
+  STT_LOCATION                        Cloud STT V2 Chirp 3 multi-region (default: us)
+  TRANSCRIBE_MODEL                    Cloud STT V2 ASR model (default: chirp_3)
+  SUMMARY_MODEL                       Vertex AI Gemini model (default: gemini-3.8-flash)
   SUBTITLE_CRAFT_BUCKET / GCS_BUCKET  GCS bucket name (default: subtitle-craft-\${PROJECT_ID})
   GCP_SERVICE_ACCOUNT                 Optional custom Service Account
 
@@ -63,13 +70,14 @@ Options:
   -p, --project PROJECT_ID     Google Cloud Project ID (overrides .env)
   -r, --region REGION          GCS Bucket Region (default: us-central1)
   -l, --location LOCATION      Vertex AI Model Location (default: global)
+  --stt-location LOCATION      Cloud STT V2 Chirp 3 Location (default: us)
   -b, --bucket BUCKET_NAME     Custom GCS bucket name (default: subtitle-craft-\${PROJECT_ID})
   -s, --service-account SA     Optional custom service account email
   -n, --dry-run                Preview commands without executing
   -h, --help                   Show this help message and exit
 
 Examples:
-  ./setup.sh                                          # Auto-provisions GCS bucket, Lifecycle, IAM & .env
+  ./setup.sh                                          # Auto-provisions APIs, GCS bucket, Lifecycle, IAM & .env
   ./setup.sh --project my-gcp-project                 # Specify project ID explicitly
   ./setup.sh --bucket my-existing-bucket              # Use a custom GCS bucket name
   ./setup.sh --dry-run                                # Preview all gcloud actions
@@ -94,6 +102,10 @@ while [[ $# -gt 0 ]]; do
             LOCATION="$2"
             shift 2
             ;;
+        --stt-location)
+            STT_LOCATION="$2"
+            shift 2
+            ;;
         -b|--bucket)
             BUCKET_NAME="$2"
             shift 2
@@ -115,6 +127,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$(printf '%s' "$TRANSCRIBE_MODEL" | tr '[:upper:]' '[:lower:]')" in
+    *chirp*) ;;
+    *)
+        echo "[*] Resetting non-Chirp TRANSCRIBE_MODEL ($TRANSCRIBE_MODEL) to chirp_3"
+        TRANSCRIBE_MODEL="chirp_3"
+        ;;
+esac
 
 echo "=================================================================="
 echo "Subtitle Craft Suite - GCP Environment Setup"
@@ -151,9 +171,15 @@ fi
 if [ "$DRY_RUN" = false ] && command -v gcloud &> /dev/null; then
     TOKEN="$(gcloud auth application-default print-access-token 2>/dev/null || true)"
     if [ -z "$TOKEN" ]; then
-        echo "[!] Warning: Application Default Credentials (ADC) not found or expired."
-        echo "    Launching: gcloud auth application-default login..."
-        gcloud auth application-default login
+        if [ -t 0 ]; then
+            echo "[!] Warning: Application Default Credentials (ADC) not found or expired."
+            echo "    Launching: gcloud auth application-default login..."
+            gcloud auth application-default login
+        else
+            echo "[!] Error: Application Default Credentials (ADC) not found, expired, or network blocked."
+            echo "    Run in an interactive terminal: gcloud auth application-default login"
+            exit 1
+        fi
     else
         echo "[✓] Application Default Credentials (ADC) verified."
     fi
@@ -181,7 +207,8 @@ if [ -z "$SERVICE_ACCOUNT" ]; then
 fi
 
 echo "[✓] Target GCP Project:   $PROJECT_ID (Number: ${PROJECT_NUMBER:-unknown})"
-echo "[✓] Vertex AI Location:   $LOCATION"
+echo "[✓] Vertex AI Location:   $LOCATION (Model: $SUMMARY_MODEL)"
+echo "[✓] Cloud STT Location:   $STT_LOCATION (Model: $TRANSCRIBE_MODEL)"
 echo "[✓] GCS Storage Region:   $REGION"
 echo "[✓] GCS Storage Bucket:   gs://$BUCKET_NAME"
 echo "[✓] Drive/GCS Service SA: $SERVICE_ACCOUNT"
@@ -193,13 +220,19 @@ fi
 # 4. Step 1: Enable Required Google Cloud APIs via gcloud
 # ------------------------------------------------------------------------------
 echo ""
-echo "[*] Step 1: Enabling Vertex AI, Cloud Storage, Google Drive & IAM APIs via gcloud..."
+echo "[*] Step 1: Enabling Vertex AI, Cloud Speech-to-Text V2, Cloud Storage, Drive & IAM APIs..."
 if [ "$DRY_RUN" = false ]; then
-    gcloud services enable aiplatform.googleapis.com storage.googleapis.com drive.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
+    gcloud services enable \
+        aiplatform.googleapis.com \
+        speech.googleapis.com \
+        storage.googleapis.com \
+        drive.googleapis.com \
+        iam.googleapis.com \
+        iamcredentials.googleapis.com \
         --project="$PROJECT_ID" --quiet
-    echo "    [✓] APIs enabled (aiplatform, storage, drive, iam, iamcredentials)."
+    echo "    [✓] APIs enabled (aiplatform, speech, storage, drive, iam, iamcredentials)."
 else
-    echo "    [Dry-Run] Would run: gcloud services enable aiplatform.googleapis.com storage.googleapis.com drive.googleapis.com iam.googleapis.com iamcredentials.googleapis.com --project=$PROJECT_ID"
+    echo "    [Dry-Run] Would run: gcloud services enable aiplatform.googleapis.com speech.googleapis.com storage.googleapis.com drive.googleapis.com iam.googleapis.com iamcredentials.googleapis.com --project=$PROJECT_ID"
 fi
 
 # ------------------------------------------------------------------------------
@@ -256,6 +289,9 @@ echo ""
 echo "[*] Step 3: Ensuring Service Account ($SERVICE_ACCOUNT) & IAM bindings..."
 SA_NAME="${SERVICE_ACCOUNT%%@*}"
 if [ "$DRY_RUN" = false ]; then
+    gcloud beta services identity create --service=speech.googleapis.com --project="$PROJECT_ID" --quiet 2>/dev/null || \
+        gcloud services identity create --service=speech.googleapis.com --project="$PROJECT_ID" --quiet 2>/dev/null || true
+
     if ! gcloud iam service-accounts describe "$SERVICE_ACCOUNT" --project="$PROJECT_ID" &>/dev/null; then
         echo "    [*] Creating Service Account: $SERVICE_ACCOUNT..."
         gcloud iam service-accounts create "$SA_NAME" \
@@ -282,6 +318,15 @@ if [ "$DRY_RUN" = false ]; then
     fi
 
     if [ -n "$SERVICE_ACCOUNT" ]; then
+        for role in "roles/aiplatform.user" "roles/speech.client"; do
+            echo "    Granting $role to serviceAccount:${SERVICE_ACCOUNT}..."
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+                --member="serviceAccount:${SERVICE_ACCOUNT}" \
+                --role="$role" \
+                --condition=None \
+                --quiet 2>/dev/null || true
+        done
+
         echo "    Granting roles/storage.objectUser to serviceAccount:${SERVICE_ACCOUNT}..."
         gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_NAME" \
             --member="serviceAccount:${SERVICE_ACCOUNT}" \
@@ -289,20 +334,21 @@ if [ "$DRY_RUN" = false ]; then
     fi
 
     if [ -n "$PROJECT_NUMBER" ]; then
-        VERTEX_AGENTS=(
+        CLOUD_SERVICE_AGENTS=(
             "service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
             "service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+            "service-${PROJECT_NUMBER}@gcp-sa-speech.iam.gserviceaccount.com"
             "${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
         )
-        for sa in "${VERTEX_AGENTS[@]}"; do
-            echo "    Granting roles/storage.objectUser to Vertex AI Service Agent ($sa)..."
+        for sa in "${CLOUD_SERVICE_AGENTS[@]}"; do
+            echo "    Granting roles/storage.objectUser to Cloud Service Agent ($sa)..."
             gcloud storage buckets add-iam-policy-binding "gs://$BUCKET_NAME" \
                 --member="serviceAccount:$sa" \
                 --role="roles/storage.objectUser" --quiet 2>/dev/null || true
         done
     fi
 else
-    echo "    [Dry-Run] Would provision $SERVICE_ACCOUNT and grant roles/iam.serviceAccountTokenCreator and roles/storage.objectUser."
+    echo "    [Dry-Run] Would provision $SERVICE_ACCOUNT and grant Vertex AI, Cloud Speech-to-Text V2, and GCS IAM bindings."
 fi
 
 # ------------------------------------------------------------------------------
@@ -312,24 +358,28 @@ echo ""
 echo "[*] Step 4: Writing configuration to $REPO_ROOT/.env ..."
 if [ "$DRY_RUN" = false ]; then
     cat <<EOF > "$REPO_ROOT/.env"
-# Google Cloud Vertex AI & Cloud Storage Configuration (100% ADC)
+# Google Cloud Vertex AI, Cloud STT V2 (Chirp 3) & Cloud Storage Configuration (100% ADC)
 GOOGLE_CLOUD_PROJECT=$PROJECT_ID
 GOOGLE_CLOUD_LOCATION=$LOCATION
 GCP_REGION=$REGION
+STT_LOCATION=$STT_LOCATION
+TRANSCRIBE_MODEL=$TRANSCRIBE_MODEL
+SUMMARY_MODEL=$SUMMARY_MODEL
 SUBTITLE_CRAFT_BUCKET=$BUCKET_NAME
 GCS_BUCKET=$BUCKET_NAME
 GCP_SERVICE_ACCOUNT=$SERVICE_ACCOUNT
 EOF
     echo "    [✓] Saved $REPO_ROOT/.env"
 else
-    echo "    [Dry-Run] Would write GOOGLE_CLOUD_PROJECT=$PROJECT_ID, GOOGLE_CLOUD_LOCATION=$LOCATION, SUBTITLE_CRAFT_BUCKET=$BUCKET_NAME to $REPO_ROOT/.env"
+    echo "    [Dry-Run] Would write GOOGLE_CLOUD_PROJECT=$PROJECT_ID, STT_LOCATION=$STT_LOCATION, TRANSCRIBE_MODEL=$TRANSCRIBE_MODEL, SUMMARY_MODEL=$SUMMARY_MODEL, SUBTITLE_CRAFT_BUCKET=$BUCKET_NAME to $REPO_ROOT/.env"
 fi
 
 echo ""
 echo "=================================================================="
 echo "GCP Environment Setup Complete (setup.sh)!"
 echo "  • Project  : $PROJECT_ID"
-echo "  • Location : $LOCATION (Vertex AI)"
+echo "  • Vertex AI: $LOCATION ($SUMMARY_MODEL)"
+echo "  • Cloud STT: $STT_LOCATION ($TRANSCRIBE_MODEL)"
 echo "  • Bucket   : gs://$BUCKET_NAME (raw/: 2d | deliverables: 15d)"
 echo "  • Config   : $REPO_ROOT/.env"
 echo "  • Google Drive 3-Tier Support:"

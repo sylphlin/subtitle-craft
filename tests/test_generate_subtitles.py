@@ -387,7 +387,66 @@ class TestGenerateSubtitles(unittest.TestCase):
             self.assertEqual(out_srt_cached, out_srt)
             self.assertEqual(mock_call_llm.call_count, 1)
 
+    def test_sanitize_subtitle_timings_bridges_post_padding_micro_gap(self):
+        # Line 1 is 0.40s long (1.00 -> 1.40), padded to min_duration 1.00s (1.00 -> 2.00),
+        # leaving a 0.08s micro-gap before Line 2 at 2.08s; sanitize_subtitle_timings must bridge it to 2.08s.
+        srt = (
+            "1\n00:00:01,000 --> 00:00:01,400\n好\n\n"
+            "2\n00:00:02,080 --> 00:00:03,800\n我們馬上進入正題\n"
+        )
+        sanitized = sanitize_subtitle_timings(srt, language="zh-TW", media_duration=4.50)
+        metrics, _, _ = audit_subtitles_quality(sanitized, language="zh-TW", media_duration=4.50)
+        self.assertEqual(metrics["micro_gaps_count"], 0)
+        self.assertEqual(metrics["overlaps_count"], 0)
+
+    def test_chirp3_asr_helpers_and_script_normalization(self):
+        from modules.chirp3_asr import (
+            _SIMP_SRC,
+            _TRAD_DST,
+            _SIMP_TO_TRAD_MAP,
+            resolve_chirp3_language_codes,
+            _compute_chunk_windows,
+            _suppress_repetition_loops,
+            _join_words_for_display,
+            _group_words_into_segments,
+        )
+
+        self.assertEqual(len(_SIMP_SRC), len(_TRAD_DST))
+        self.assertEqual("视频与语音识别".translate(_SIMP_TO_TRAD_MAP), "視頻與語音識別")
+
+        codes_tw, loc_tw = resolve_chirp3_language_codes("zh-TW")
+        self.assertEqual(codes_tw, ["cmn-Hant-TW", "en-US"])
+        self.assertEqual(loc_tw, "zh-TW")
+
+        codes_auto, loc_auto = resolve_chirp3_language_codes("auto", initial_prompt="以下是繁體中文訪談：雲端運算")
+        self.assertEqual(codes_auto, ["cmn-Hant-TW", "en-US"])
+        self.assertEqual(loc_auto, "zh-TW")
+
+        self.assertEqual(_compute_chunk_windows(300.0), [(0.0, 300.0)])
+        windows_long = _compute_chunk_windows(2200.0)
+        self.assertEqual(len(windows_long), 3)
+        self.assertEqual(windows_long[0], (0.0, 1080.0))
+        self.assertEqual(windows_long[1][0], 1075.0)
+        self.assertEqual(windows_long[-1][1], 2200.0)
+
+        looped_words = [{"word": "啦", "start": float(i), "end": float(i) + 0.2} for i in range(6)]
+        deduped = _suppress_repetition_loops(looped_words)
+        self.assertEqual(len(deduped), 1)
+
+        timed_words = [
+            {"word": "歡迎", "start": 0.50, "end": 0.90},
+            {"word": "體驗", "start": 0.90, "end": 1.30},
+            {"word": "Gemini", "start": 1.35, "end": 1.80},
+            {"word": "字幕", "start": 2.60, "end": 3.10},
+        ]
+        self.assertEqual(_join_words_for_display(["歡迎", "體驗", "Gemini"]), "歡迎體驗 Gemini")
+        segs = _group_words_into_segments(timed_words, norm_lang="zh-TW")
+        self.assertEqual(len(segs), 2)
+        self.assertAlmostEqual(segs[0]["end"], 1.80, places=2)
+        self.assertAlmostEqual(segs[1]["start"], 2.60, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

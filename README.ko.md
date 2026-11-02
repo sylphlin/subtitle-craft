@@ -6,17 +6,17 @@
 
 > [!IMPORTANT]
 > **Google Antigravity 네이티브 플러그인 및 워크플로 스위트**  
-> 본 툴킷은 **Google Antigravity**(**Vertex AI Gemini 3.8 Flash** 및 **Whisper 단어 타임스탬프** 기반)를 위한 독립형 3단계 YouTube / Netflix 자막 생성 및 품질 감사 스위트입니다.
+> 본 툴킷은 **Google Antigravity**를 위한 독립형 3단계 YouTube / Netflix 자막 생성 및 품질 감사 스위트로, **Vertex AI Gemini 3.8 Flash**와 듀얼 음향 타임스탬프 엔진(기본값: **Google Cloud Speech-to-Text V2 `Chirp 3`**, 선택 사항: **로컬 `Whisper`**)으로 구동됩니다.
 
 ---
 
-**Subtitle Craft**는 로컬 또는 Google Drive의 비디오 및 오디오 파일에서 밀리초 단위로 정확하게 정렬되고 전문 용어가 통일된 자막(`.srt` 및 `.vtt`)을 생성합니다. Antigravity 채팅 창에서 자연어로 지시하면 자막 생성부터 품질 감사까지 전체 워크플로를 자동으로 수행합니다.
+**Subtitle Craft**는 로컬 또는 Google Drive의 비디오 및 오디오 파일에서 밀리초 단위로 정확하게 정렬되고 전문 용어가 통일된 자막(`.srt` 및 `.vtt`)을 생성합니다. Antigravity 채팅 창에서 자연어 프롬프트로 지시하면 용어집 추출, 단어 경계 정렬, 멀티모달 오디오 교정, 품질 감사까지 자동으로 수행합니다.
 
 ---
 
 ## 설치 및 Google Cloud 설정 (`setup.sh`)
 
-본 프로젝트는 [Agent Plugins 1.0](https://agent-plugins.org/) 표준을 준수하며 **Google Cloud Vertex AI (ADC)** 및 **Cloud Storage (GCS)** 기반으로 동작합니다.
+본 프로젝트는 [Agent Plugins 1.0](https://agent-plugins.org/) 표준을 준수하며 **Google Cloud Application Default Credentials (ADC)**를 통해 **Vertex AI**, **Cloud Speech-to-Text V2 (`chirp_3`)**, **Cloud Storage (GCS)** 기반으로 동작합니다(API 키 불필요).
 
 ```bash
 # 1a. 글로벌 Antigravity Plugin으로 클론 (권장)
@@ -25,18 +25,21 @@ git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugin
 # 1b. 레거시 단일 Skill 디렉터리 설치 (선택 사항: 내부 skills/subtitle-craft 심볼릭 링크 연결)
 ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
 
-# 2. 의존성 설치 및 ADC 인증
+# 2. 핵심 클라우드 패키지 설치(기본 Cloud Chirp 3 + Gemini 지원) 및 ADC 인증
 brew install ffmpeg
 pip install -r requirements.txt
+# (선택 사항) 로컬 Whisper 엔진을 사용하려는 경우에만 설치:
+# Apple Silicon Mac: pip install mlx-whisper
+# 일반 CPU / NVIDIA GPU: pip install faster-whisper
 gcloud auth application-default login
 
-# 3. setup.sh 실행하여 GCS 버킷, 2단계 수명 주기(raw: 2일, 결과물: 15일), IAM 및 .env 설정
+# 3. setup.sh 실행하여 Vertex AI·Speech-to-Text V2 API 활성화, GCS 버킷, 수명 주기, IAM 및 .env 설정
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```
 
 ### 디렉터리 구조 (Agent Plugins 1.0 표준)
-- **SSOT 실제 디렉터리**: `skills/subtitle-craft/`(`SKILL.md`, `scripts/`, `assets/` 포함)를 단일 진실 공급원(SSOT)으로 사용합니다.
+- **SSOT 실제 디렉터리**: `skills/subtitle-craft/`(`SKILL.md`, `scripts/generate_subtitles.py`, `scripts/modules/chirp3_asr.py`, `llm_client.py`, `gcp_client.py`, `assets/` 포함)를 단일 진실 공급원(SSOT)으로 사용합니다.
 - **2계층 `AGENTS.md` 구성**: 루트 `AGENTS.md`는 워크스페이스 및 개발 표준(Part I & Part II)을 정의하고, 플러그인 내부의 `rules/AGENTS.md`는 AI 클라이언트 실행 규칙(`<PLUGIN_ROOT>` 직접 CLI 호출, 읽기 전용, Fail-Fast)을 정의합니다.
 
 ---
@@ -60,11 +63,11 @@ flowchart TD
     subgraph Stage1["Stage 1: 글로벌 오디오 분석 및 용어집 추출"]
         S0["FFmpeg 오디오 추출<br/>(16 kHz 모노 WAV & 48 kbps MP3)"]:::stage1Style
         S1["Vertex AI Gemini 3.8 Flash<br/>(1M 컨텍스트 전체 오디오 스캔)"]:::stage1Style
-        GL["중간 아티팩트: <basename>_glossary.md<br/>+ Whisper 초기 프롬프트"]:::artifactStyle
+        GL["중간 아티팩트: <basename>_glossary.md<br/>+ 음성 인식 바이어스 프롬프트"]:::artifactStyle
     end
 
-    subgraph Stage2["Stage 2: Whisper 음향 타임스탬프 추출"]
-        S2["제로 드리프트 음향 전사<br/>(mlx-whisper / faster-whisper, word_timestamps=True)"]:::stage2Style
+    subgraph Stage2["Stage 2: 듀얼 엔진 음향 타임스탬프 추출"]
+        S2["단어 타임스탬프 전사<br/>(기본값: Cloud STT V2 Chirp 3 / 선택: 로컬 Whisper)"]:::stage2Style
         WD["중간 아티팩트: <basename>_raw_whisper.srt<br/>+ <basename>_words.json"]:::artifactStyle
     end
 
@@ -98,14 +101,21 @@ flowchart TD
 
 ---
 
-## Antigravity 사용 방법 및 시나리오 (Usage & Scenarios)
+## 두 가지 음향 타임스탬프 방식 및 프롬프트 호출 가이드
 
-Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
-1. **간결한 명령어 (`/skill` + `@파일`)**: `/subtitle-craft`를 선택하고 `@`로 미디어 파일, 개요 또는 대본만 지정하면 즉시 실행됩니다.
-2. **자연어 프롬프트**: 일상적인 문장으로 요청 사항을 입력하고 `@` 파일이나 클라우드 링크를 첨부하면 자동으로 플러그인이 호출됩니다.
+Stage 2는 두 가지 단어 타임스탬프 엔진을 지원합니다. CLI 매개변수를 입력할 필요 없이 Antigravity 채팅 프롬프트만으로 원하는 방식을 호출할 수 있습니다.
 
-### 시나리오 1: 표준 YouTube 및 Netflix 자막 생성
-- **사용 사례**: 비디오 또는 오디오 파일에서 밀리초 단위로 정렬된 `.srt` 및 `.vtt` 자막을 생성하고 동음이의어와 전문 용어를 교정합니다.
+| 음향 타임스탬프 방식 | 실행 위치 및 모델 | 주요 특징 및 권장 상황 | 프롬프트 호출 방법 |
+| :--- | :--- | :--- | :--- |
+| **방식 1: 클라우드 Chirp 3 (기본값)** | Google Cloud Speech-to-Text V2 (`chirp_3`) | 로컬 음성 모델 다운로드가 필요 없으며, 휴지 직후 발화 시작점 정렬이 정밀하고 영상 끝부분까지 누락 없이 포착합니다. | **일반적인 자막 생성 프롬프트를 그대로 입력** (별도 엔진 언급 없이 자동으로 Chirp 3 실행). |
+| **방식 2: 로컬 Whisper (선택 사항)** | 로컬 `mlx-whisper`(Apple Silicon) 또는 `faster-whisper` | 로컬 GPU / CPU로 단어 타임스탬프를 추출합니다. 로컬 환경에서 음향 전사를 수행하거나 엔진 간 비교가 필요할 때 선택합니다. | **프롬프트에 "Whisper 사용" 또는 "로컬 Whisper로"라고 명시**. |
+
+Antigravity에서는 다음 두 가지 프롬프트 형식을 사용할 수 있습니다:
+1. **간결한 명령어 (`/skill` + `@파일`)**: `/subtitle-craft`를 선택하고 `@`로 미디어 파일, 개요 또는 대본을 지정합니다.
+2. **자연어 프롬프트**: 일상적인 문장으로 요청 사항을 입력하고 `@` 파일이나 Google Drive 링크를 첨부합니다.
+
+### 시나리오 1: 표준 방송 및 스트리밍 자막 생성 (기본 Cloud Chirp 3 자동 사용)
+- **사용 사례**: 기본 Cloud Chirp 3로 단어 타임스탬프를 추출하고 Gemini 3.8 Flash로 동음이의어와 전문 용어를 교정합니다.
 - **방식 A (`/ + @` 간결한 명령어)**:
   ```text
   /subtitle-craft 파일: @final_cut.mp4
@@ -119,8 +129,22 @@ Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
   2. `final_cut_glossary.md` (검증된 전문 용어 및 화자 목록).
   3. `final_cut_subtitle_report.md` 및 `final_cut_subtitle_report.json` (8차원 스트리밍 품질 감사 리포트).
 
-### 시나리오 2: 인터뷰 개요 또는 대본을 활용한 용어 고정 자막 생성
-- **사용 사례**: 출연자 이름, 브랜드 표기 또는 녹음 대본을 함께 제공하여 전체 영상의 용어 일관성을 100% 보장합니다.
+### 시나리오 2: 프롬프트로 로컬 Whisper 음향 엔진 지정
+- **사용 사례**: Stage 2 단어 타임스탬프 추출을 로컬 Apple Silicon GPU(`mlx-whisper`) 또는 CPU(`faster-whisper`)로 실행합니다.
+- **방식 A (`/ + @` 간결한 명령어)**:
+  ```text
+  /subtitle-craft 파일: @final_cut.mp4, 엔진: Whisper
+  ```
+- **방식 B (자연어 프롬프트)**:
+  ```text
+  로컬 Whisper를 사용해서 @final_cut.mp4의 한국어 YouTube 자막을 생성하고 전문 용어를 교정해 줘.
+  ```
+- **산출물**:
+  1. `final_cut.srt` 및 `final_cut.vtt` (로컬 Whisper 단어 타임스탬프에 맞춰 정렬된 자막).
+  2. `final_cut_glossary.md`, `final_cut_subtitle_report.md`, `final_cut_subtitle_report.json`.
+
+### 시나리오 3: 인터뷰 개요 또는 대본을 활용한 용어 고정 자막 생성
+- **사용 사례**: 출연자 이름, 브랜드 표기 또는 녹음 대본을 함께 제공하여 전체 영상의 용어 일관성을 유지합니다(미지정 시 기본 Chirp 3 사용, 프롬프트에서 Whisper 지정 가능).
 - **방식 A (`/ + @` 간결한 명령어)**:
   ```text
   /subtitle-craft 파일: @interview.mp4, 개요: @outline.md, 대본: @script.md
@@ -133,7 +157,7 @@ Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
   1. `interview.srt` 및 `interview.vtt` (개요 및 대본 용어가 반영된 자막).
   2. `interview_glossary.md`, `interview_subtitle_report.md`, `interview_subtitle_report.json`.
 
-### 시나리오 3: Google Drive 공유 링크에서 직접 자막 생성
+### 시나리오 4: Google Drive 공유 링크에서 직접 자막 생성
 - **사용 사례**: Google Drive 비디오 또는 오디오 링크를 직접 전달하여 원격 MD5 캐시 검증과 함께 자막을 생성합니다.
 - **방식 A (`/ + @` 간결한 명령어)**:
   ```text
@@ -149,14 +173,14 @@ Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
 
 ---
 
-## 3단계 핵심 기술 개요 (v2.0 아키텍처)
+## 3단계 핵심 기술 개요
 
 - **출력 디렉터리 자동 분리 (`<input_dir>/output/`)**: 모든 산출물과 캐시 파일은 기본적으로 `<input_dir>/output/` 하위 폴더에 저장됩니다(입력 경로가 이미 `output/`인 경우 중첩 없이 그대로 재사용합니다).
-1. **Stage 1 (Vertex AI 1M 글로벌 용어집 및 Whisper 초기 프롬프트 — 엄격한 Fail-Fast)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 Whisper 초기 프롬프트를 추출하며, 클라우드 오류 발생 시 즉시 종료 코드 `1`로 중단합니다.
-2. **Stage 2 (Whisper 단어 수준 음향 타임스탬프 — 기본값 `small` 모델)**: 기본 Whisper `small` 모델로 `mlx-whisper` 또는 `faster-whisper`(`word_timestamps=True`)를 실행하여 고정밀 단어 경계를 `<basename>_words.json`에 캐시합니다.
+1. **Stage 1 (Vertex AI 1M 글로벌 용어집 추출 — 엄격한 Fail-Fast)**: **Gemini 3.8 Flash**로 전체 오디오를 스캔하여 `<basename>_glossary.md`와 음성 인식 바이어스 프롬프트를 추출하며, 클라우드 오류 발생 시 즉시 종료 코드 `1`로 중단합니다.
+2. **Stage 2 (듀얼 엔진 단어 수준 음향 타임스탬프 — 기본값 `Chirp 3`, 선택 `Whisper`)**: 기본값으로 Google Cloud Speech-to-Text V2 `chirp_3`(`STT_LOCATION=us`, `enableWordTimeOffsets=True`)를 실행하며, 프롬프트에서 Whisper를 요청한 경우 로컬 `mlx-whisper` 또는 `faster-whisper`(기본 `small` 모델)를 실행합니다. `<basename>_words.json`에 엔진 식별자를 기록하므로 엔진 전환 시 Stage 1 용어집을 재사용하면서 Stage 2만 자동으로 다시 실행합니다.
 3. **Stage 3 (무음 인식 청킹, 다단계 비연쇄 재투영 및 `agent_verdict` 품질 게이트)**:
    - 자연스러운 호흡 구간($\ge 0.4\text{s}$)에서 분할하여 오디오 청크와 글로벌 용어집을 바탕으로 동음이의어를 교정합니다.
-   - **다단계 음향 재투영(`realign_subtitles_to_words`) 및 균형 분할(`sanitize_subtitle_timings`)**: 한·중·일·영 구어 수사, 소수점(`.`), 퍼센트(`%`), 통화 기호(`$`), 천 단위 구분 기호(`,`)를 정규화하고, 무음 직후 Whisper가 과도하게 늘린 첫 단어 시작 시점을 자동 보정(`_clamp_inflated_word_onset`)합니다. 청크 단위 글로벌 `difflib` 마일스톤 시딩, 양방향 탄성 탐색 윈도우(`cur_char_idx - 15`), 전후 앵커 사이의 미소비 글자에 대한 경계 보간을 통해 연쇄적인 타임스탬프 밀림을 방지합니다. 또한 3단계 동적 계획법(3-Tier DP)으로 긴 문장을 균형 있게 분할(짧은 고아 꼬리 방지)하고, 편집 거리 및 휴지 가중치로 하위 절을 단어 경계에 고정하며, 읽기 속도(CPS)에 따라 $+0.4\text{s}\text{–}1.1\text{s}$의 적응형 읽기 버퍼를 부여합니다(상한 `media_duration + 0.4s`).
+   - **다단계 음향 재투영(`realign_subtitles_to_words`) 및 균형 분할(`sanitize_subtitle_timings`)**: 한·중·일·영 구어 수사, 소수점(`.`), 퍼센트(`%`), 통화 기호(`$`), 천 단위 구분 기호(`,`)를 정규화하고, 무음 직후 과도하게 늘어난 첫 단어 시작 시점을 보정(`_clamp_inflated_word_onset`)합니다. 청크 단위 `difflib` 마일스톤 시딩, 양방향 탄성 탐색 윈도우(`cur_char_idx - 15`), 전후 앵커 경계 보간으로 타임스탬프 밀림을 방지합니다. 또한 3단계 동적 계획법(3-Tier DP)으로 긴 문장을 균형 있게 분할하고, 읽기 속도(CPS)에 따라 $+0.4\text{s}\text{–}1.1\text{s}$의 읽기 버퍼(상한 `media_duration + 0.4s`)와 $<0.2\text{s}$ 미세 간격 병합을 적용합니다.
    - `<basename>_subtitle_report.json` 최상위에 `agent_verdict`를 기록하며 품질 게이트 미달 시 Agent가 최대 1회 자동 복구 재시도를 수행합니다.
 
 ---
@@ -165,7 +189,7 @@ Antigravity에서는 다음 두 가지 방식으로 실행할 수 있습니다:
 
 | GCS 경로 접두사 (`matchesPrefix`) | 저장 객체 | 보관 기간 (`age`) | 정리 방식 |
 | :--- | :--- | :--- | :--- |
-| **`raw/audio_chunks/`** | Stage 3 오디오 청크 | **추론 직후 즉시 삭제** | 각 청크 완료 후 Python `finally` 블록에서 즉시 삭제합니다. |
+| **`raw/audio_chunks/`**, **`raw/chirp3_asr_*/`** | Stage 2 / Stage 3 오디오 슬라이스 | **추론 직후 즉시 삭제** | 각 배치 완료 후 Python `finally` 블록에서 즉시 삭제합니다. |
 | **`raw/`** | 스테이징된 에피소드 오디오 | **2일 (`age: 2`)** | SHA-256 캐시 재사용을 위해 2일간 보관 후 자동 삭제합니다. |
 | **`output/`**, **`deliverables/`** | SRT/VTT 자막 및 감사 리포트 | **15일 (`age: 15`)** | 팀 검토를 위해 15일간 보관한 후 자동 삭제합니다. |
 

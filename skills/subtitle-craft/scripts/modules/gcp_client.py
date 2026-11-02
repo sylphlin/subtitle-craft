@@ -79,15 +79,21 @@ def _parse_env_file(filepath):
     return kv
 
 
-def resolve_gcp_config(cli_project=None, cli_bucket=None, cli_location=None, cli_region=None):
+def resolve_gcp_config(
+    cli_project=None,
+    cli_bucket=None,
+    cli_location=None,
+    cli_region=None,
+    cli_stt_location=None,
+):
     """
-    Resolve GCP Project ID, GCS Bucket, Vertex AI Location, and GCS Region:
-      1. Explicit CLI arguments (--project, --gcs-bucket, --location, --region)
-      2. Environment variables (GOOGLE_CLOUD_PROJECT / GCP_PROJECT, SUBTITLE_CRAFT_BUCKET / GCS_BUCKET, GOOGLE_CLOUD_LOCATION, GCP_REGION)
+    Resolve GCP configuration from CLI arguments, environment variables, .env files, and ADC.
+    Priority order:
+      1. Explicit CLI arguments (--project, --gcs-bucket, --location, --region, --stt-location)
+      2. Environment variables (GOOGLE_CLOUD_PROJECT, SUBTITLE_CRAFT_BUCKET, GOOGLE_CLOUD_LOCATION, GCP_REGION, STT_LOCATION)
       3. Project root .env and ~/.gemini/.env
       4. Application Default Credentials (google.auth.default()) and gcloud CLI config
-      5. Default bucket name: subtitle-craft-${PROJECT_ID}
-    Returns: dict(project=..., bucket=..., location=..., region=...)
+      5. Defaults: bucket=subtitle-craft-${PROJECT_ID}, location=global, region=us-central1, stt_location=us
     """
     project = cli_project or os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
     bucket = (
@@ -98,6 +104,9 @@ def resolve_gcp_config(cli_project=None, cli_bucket=None, cli_location=None, cli
     )
     location = cli_location or os.environ.get("GOOGLE_CLOUD_LOCATION")
     region = cli_region or os.environ.get("GCP_REGION")
+    stt_location = cli_stt_location or os.environ.get("STT_LOCATION")
+    transcribe_model = os.environ.get("TRANSCRIBE_MODEL")
+    summary_model = os.environ.get("SUMMARY_MODEL") or os.environ.get("MODEL")
 
     # Scan .env files when any parameter is missing
     _abs_file = os.path.abspath(__file__)
@@ -127,6 +136,12 @@ def resolve_gcp_config(cli_project=None, cli_bucket=None, cli_location=None, cli
                 location = env_vars.get("GOOGLE_CLOUD_LOCATION")
             if not region:
                 region = env_vars.get("GCP_REGION")
+            if not stt_location:
+                stt_location = env_vars.get("STT_LOCATION")
+            if not transcribe_model:
+                transcribe_model = env_vars.get("TRANSCRIBE_MODEL")
+            if not summary_model:
+                summary_model = env_vars.get("SUMMARY_MODEL") or env_vars.get("MODEL")
 
     # Fallback: discover project via google.auth.default() or gcloud CLI
     if not project and HAS_GOOGLE_AUTH:
@@ -158,17 +173,26 @@ def resolve_gcp_config(cli_project=None, cli_bucket=None, cli_location=None, cli
     if not bucket and project:
         bucket = f"subtitle-craft-{project}"
 
-    # Default location for Vertex AI Gemini 3.8 Flash is 'global'; GCS region is 'us-central1'
+    # Default locations and designated models
     if not location:
         location = "global"
     if not region:
         region = "us-central1"
+    if not stt_location:
+        stt_location = "us"
+    if not transcribe_model or not str(transcribe_model).lower().startswith("chirp"):
+        transcribe_model = "chirp_3"
+    if not summary_model:
+        summary_model = "gemini-3.8-flash"
 
     return {
         "project": project,
         "bucket": bucket,
         "location": location,
         "region": region,
+        "stt_location": stt_location,
+        "transcribe_model": transcribe_model,
+        "summary_model": summary_model,
     }
 
 
