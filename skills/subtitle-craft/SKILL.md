@@ -18,8 +18,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 ## Prerequisites & Environment
 
 - **Google Antigravity IDE / Agent Framework**
-- **FFmpeg** (for 16 kHz mono PCM WAV and 48 kbps MP3 audio extraction)
-- **Python 3.9+** with `google-genai`, `google-cloud-storage`, `google-auth`, and `requests` (optional local Whisper backend: `mlx-whisper` on Apple Silicon or `faster-whisper` when local Whisper is explicitly requested)
+- **Python 3.9+** with `google-genai`, `google-cloud-storage`, `google-auth`, `requests`, and `static-ffmpeg` via `requirements.txt` (`static-ffmpeg` automatically supplies cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is not installed, while preserving native system FFmpeg when present; optional local Whisper backend: `mlx-whisper` on Apple Silicon or `faster-whisper`)
 - **Cloud Credentials (100% ADC + Vertex AI, Cloud STT V2 & GCS)**:
   - Authenticate via `gcloud auth application-default login`
   - Run `./setup.sh` once to enable Vertex AI and Cloud Speech-to-Text V2 (`speech.googleapis.com`), provision the GCS bucket (`gs://subtitle-craft-${GOOGLE_CLOUD_PROJECT}`), configure two-tier Lifecycle auto-cleanup rules (`raw/` staging: 2 days; `output/`, `deliverables/`: 15 days), bind Vertex AI and Speech Service Agent IAM (`roles/storage.objectUser`), and generate `.env`.
@@ -33,7 +32,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 | **CLI Entrypoint** | `scripts/generate_subtitles.py` | Executes the 3-Stage Golden Subtitle Pipeline and 8-Dimension Quality Audit |
 | **Chirp 3 ASR Engine** | `scripts/modules/chirp3_asr.py` | Cloud Speech-to-Text V2 (`chirp_3`) batch recognition, silence chunking, and word-offset extraction |
 | **Vertex AI Client** | `scripts/modules/llm_client.py` | Vertex AI Gemini 3.8 Flash multimodal inference via ADC and GCS `gs://` URIs with HTTP 429 retry |
-| **GCP & Drive Client** | `scripts/modules/gcp_client.py` | GCS SHA-256 cached upload, ephemeral chunk cleanup, and 3-Tier Google Drive download |
+| **GCP & Drive Client** | `scripts/modules/gcp_client.py` | GCS SHA-256 cached upload, ephemeral chunk cleanup, 3-Tier Google Drive download, and `static-ffmpeg` PATH helper |
 | **Progress Utility** | `scripts/modules/progress.py` | Live terminal spinner and elapsed timer |
 | **Locale Templates** | `assets/subtitle_proofread_template.{zh-TW,zh-CN,en,ja,ko}.md` | Language-specific Netflix & YouTube segmentation, typography, and proofreading rules |
 
@@ -65,7 +64,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft` or the repository root).
 
 ### Step 1: Environment & Cloud Auth Verification
-Verify that FFmpeg, `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `./setup.sh --project YOUR_PROJECT_ID` or `gcloud auth application-default login`.
+Verify that Python dependencies (`requirements.txt`, including `static-ffmpeg` or system FFmpeg), `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `pip install -r requirements.txt`, `./setup.sh --project YOUR_PROJECT_ID`, or `gcloud auth application-default login`.
 
 ### Step 2: Execute the 3-Stage Subtitle Pipeline
 Set `Cwd` to `<PLUGIN_ROOT>` and run `skills/subtitle-craft/scripts/generate_subtitles.py` directly via `run_command` (when `-o` is omitted, all outputs are automatically isolated in `<input_dir>/output/`).

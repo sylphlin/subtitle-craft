@@ -18,34 +18,25 @@
 
 This project complies with [Agent Plugins 1.0](https://agent-plugins.org/) and authenticates with **Google Cloud Application Default Credentials (ADC)** across **Vertex AI**, **Cloud Speech-to-Text V2 (`chirp_3`)**, and **Cloud Storage (GCS)**. Do not create or store API key files.
 
-### 1. Install as an Antigravity Plugin or Skill
-
-- **Global Plugin (Recommended)**:
-  ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
-  ```
-- **Legacy Single-Skill Installation (`~/.gemini/config/skills/`)**:
-  Link the `skills/subtitle-craft` directory into the legacy skills directory:
-  ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
-  ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
-  ```
-
-### 2. Install Dependencies and Provision Cloud Resources (`setup.sh`)
+### 1. Install the Antigravity Plugin
 
 ```bash
-# 1. Install FFmpeg and core cloud Python packages (supports default Cloud Chirp 3 + Gemini)
-brew install ffmpeg
-pip install -r requirements.txt
+agy plugin install https://github.com/sylphlin/subtitle-craft
+```
 
-# (Optional) Install a local Whisper backend only if you plan to request local Whisper:
-# Apple Silicon Mac: pip install mlx-whisper
-# CPU / NVIDIA GPU:  pip install faster-whisper
+### 2. Install Python Dependencies and Provision Cloud Resources (`setup.sh`)
+
+`requirements.txt` includes `static-ffmpeg`, which automatically provides cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is not installed, while preserving native system FFmpeg when present.
+
+```bash
+# 1. Install core Python and media dependencies (supports default Cloud Chirp 3 + Gemini)
+pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 
 # 2. Authenticate Application Default Credentials (ADC)
 gcloud auth application-default login
 
 # 3. Enable Vertex AI & Speech-to-Text V2 APIs, provision GCS bucket, lifecycle rules, IAM, and .env
+cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```

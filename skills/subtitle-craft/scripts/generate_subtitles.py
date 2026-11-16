@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from modules.llm_client import call_llm
     from modules.gcp_client import (
+        ensure_ffmpeg_in_path,
         resolve_gcp_config,
         upload_file_to_gcs_with_cache,
         is_gdrive_source,
@@ -50,6 +51,7 @@ try:
 except ImportError:
     from scripts.modules.llm_client import call_llm
     from scripts.modules.gcp_client import (
+        ensure_ffmpeg_in_path,
         resolve_gcp_config,
         upload_file_to_gcs_with_cache,
         is_gdrive_source,
@@ -134,6 +136,7 @@ def srt_to_vtt(srt_content):
 
 def extract_audio_16k_mono(input_media, output_wav):
     """Extract audio from input media to 16kHz mono 16-bit PCM WAV."""
+    ensure_ffmpeg_in_path()
     cmd = [
         "ffmpeg", "-y", "-i", input_media,
         "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
@@ -153,6 +156,7 @@ def run_whisper_transcription(audio_wav, model_size="small", language="zh", devi
       3. openai-whisper (PyTorch MPS / CUDA / CPU)
     Returns: (sub_list, detected_lang, all_words)
     """
+    ensure_ffmpeg_in_path()
     print(f"\n[Stage 2/3] Running Whisper acoustic transcription (Model: {model_size}, Device: {device}, Word Timestamps: ON)...")
     if initial_prompt:
         print(f"  • Bias Prompt   : {initial_prompt}")
@@ -2431,6 +2435,7 @@ def main():
                         help="Maximum characters per line for Latin script (en and fallback) (default: 42)")
 
     args = parser.parse_args()
+    ensure_ffmpeg_in_path()
 
     gcp_cfg = resolve_gcp_config(
         cli_project=args.project,

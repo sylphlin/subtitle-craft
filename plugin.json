@@ -1,8 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "subtitle-craft",
+  "displayName": "Subtitle Craft",
   "version": "2.0.0",
   "description": "Broadcast-grade YouTube & Netflix subtitle generator (SRT & VTT). Executes a 3-stage pipeline: Vertex AI Gemini 3.8 Flash 1M context global glossary extraction, dual-engine word-level acoustic ground truth (default: Google Cloud Speech-to-Text V2 Chirp 3; optional: local Apple Silicon MLX / faster-whisper), silence-aware chunked multimodal audio proofreading via Google Cloud Vertex AI (ADC) + GCS, resilient non-cascading word-boundary timestamp reprojection, rhythm sanitization, and 8-dimension streaming quality audit with machine-readable agent_verdict quality gate.",
+  "suggestedPrompts": [
+    "Generate broadcast-ready SRT and VTT subtitles for @video.mp4 and proofread technical terminology",
+    "Generate Traditional Chinese YouTube subtitles for @interview.mp4 using @outline.md and @script.md",
+    "Generate subtitles for @interview_audio.mp3 using local Whisper"
+  ],
   "author": {
     "name": "sylphlin",
     "url": "https://github.com/sylphlin"

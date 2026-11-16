@@ -37,6 +37,7 @@ dependencies = [
     "google-cloud-storage>=3.0.0",
     "google-auth>=2.0.0",
     "requests>=2.31.0",
+    "static-ffmpeg>=3.0",
 ]
 
 [project.optional-dependencies]

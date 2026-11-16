@@ -20,7 +20,7 @@ import uuid
 import google.auth
 from google.auth.transport.requests import Request as GoogleAuthRequest
 
-from .gcp_client import ensure_gcs_bucket, get_gcs_storage_client
+from .gcp_client import ensure_ffmpeg_in_path, ensure_gcs_bucket, get_gcs_storage_client
 from .progress import LiveTicker
 
 DEFAULT_CHIRP3_MODEL = "chirp_3"
@@ -142,6 +142,7 @@ def _parse_offset_seconds(offset_val):
 
 
 def _get_audio_duration(audio_path):
+    ensure_ffmpeg_in_path()
     cmd = [
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path),
@@ -437,6 +438,7 @@ def run_chirp3_transcription(
     temp_mp3 = os.path.join(tempfile.gettempdir(), f"chirp3_sub_{run_id}.mp3")
 
     try:
+        ensure_ffmpeg_in_path()
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(audio_wav), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", temp_mp3],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,

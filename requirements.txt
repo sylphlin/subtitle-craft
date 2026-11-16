@@ -1,8 +1,9 @@
-# Core Google Cloud (Vertex AI + Cloud STT V2 Chirp 3 + GCS) and HTTP dependencies
+# Core Google Cloud (Vertex AI + Cloud STT V2 Chirp 3 + GCS), HTTP, and media dependencies
 google-genai>=0.1.1
 google-cloud-storage>=3.0.0
 google-auth>=2.0.0
 requests>=2.31.0
+static-ffmpeg>=3.0
 
 # Optional local Whisper ASR backends (used when local Whisper mode is requested)
 # macOS Apple Silicon (Metal GPU / Neural Engine acceleration):

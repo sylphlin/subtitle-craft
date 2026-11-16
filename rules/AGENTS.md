@@ -1,3 +1,6 @@
+---
+trigger: always_on
+---
 # Subtitle Craft - Operational Invariants for AI Clients
 
 When you execute tasks or skills from this plugin, you MUST follow these operational rules:
@@ -14,7 +17,7 @@ When you execute tasks or skills from this plugin, you MUST follow these operati
 - If a script fails with exit code `1` (such as 401 Unauthorized, 403 Forbidden, Quota Exceeded, missing Application Default Credentials, or missing FFmpeg):
   - Stop immediately. Do NOT retry or silently downgrade to `--asr-engine whisper`.
   - Show the exact error message and exit status to the user.
-  - Give a clear, actionable solution to the user (for example, run `./setup.sh --project YOUR_PROJECT_ID`, run `gcloud auth application-default login`, or install FFmpeg).
+  - Give a clear, actionable solution to the user (for example, run `./setup.sh --project YOUR_PROJECT_ID`, run `gcloud auth application-default login`, or run `pip install -r requirements.txt` to install `static-ffmpeg` and core dependencies).
   - Do NOT try to modify the script, probe different code paths, or rewrite logic.
 - After running `generate_subtitles.py`, verify that all required deliverable files (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) exist in the output directory (`<input_dir>/output/` by default) and are non-empty (`> 0 bytes`).
 - Inspect the top-level `agent_verdict` object in `<BASENAME>_subtitle_report.json`:

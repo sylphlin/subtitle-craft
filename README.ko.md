@@ -18,22 +18,18 @@
 
 본 프로젝트는 [Agent Plugins 1.0](https://agent-plugins.org/) 표준을 준수하며 **Google Cloud Application Default Credentials (ADC)**를 통해 **Vertex AI**, **Cloud Speech-to-Text V2 (`chirp_3`)**, **Cloud Storage (GCS)** 기반으로 동작합니다(API 키 불필요).
 
+`requirements.txt`에는 `static-ffmpeg`가 포함되어 있어 시스템에 FFmpeg가 없을 경우 크로스 플랫폼 `ffmpeg` 및 `ffprobe` 실행 파일을 자동 제공하며, 이미 설치된 경우 기존 시스템 FFmpeg를 우선 사용합니다.
+
 ```bash
-# 1a. 글로벌 Antigravity Plugin으로 클론 (권장)
-git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
+# 1. Antigravity Plugin 설치
+agy plugin install https://github.com/sylphlin/subtitle-craft
 
-# 1b. 레거시 단일 Skill 디렉터리 설치 (선택 사항: 내부 skills/subtitle-craft 심볼릭 링크 연결)
-ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
-
-# 2. 핵심 클라우드 패키지 설치(기본 Cloud Chirp 3 + Gemini 지원) 및 ADC 인증
-brew install ffmpeg
-pip install -r requirements.txt
-# (선택 사항) 로컬 Whisper 엔진을 사용하려는 경우에만 설치:
-# Apple Silicon Mac: pip install mlx-whisper
-# 일반 CPU / NVIDIA GPU: pip install faster-whisper
+# 2. Python 및 미디어 의존성 패키지 설치 및 ADC 인증
+pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 gcloud auth application-default login
 
 # 3. setup.sh 실행하여 Vertex AI·Speech-to-Text V2 API 활성화, GCS 버킷, 수명 주기, IAM 및 .env 설정
+cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```

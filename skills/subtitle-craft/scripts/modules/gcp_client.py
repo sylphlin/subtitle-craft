@@ -9,6 +9,7 @@ and 3-tier Google Drive file download.
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -42,6 +43,17 @@ _MIME_TYPES = {
     ".webm": "video/webm",
     ".m4v": "video/mp4",
 }
+
+
+def ensure_ffmpeg_in_path() -> None:
+    """Add static-ffmpeg binaries to PATH when system ffmpeg or ffprobe is missing."""
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths(weak=True)
+    except ImportError:
+        pass
 
 
 def guess_mime_type(filepath):

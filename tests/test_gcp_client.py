@@ -89,6 +89,33 @@ class TestGcpClient(unittest.TestCase):
         r3 = parse_gdrive_url("https://drive.google.com/open?id=1XyZ9876543210AbCdEfGhIjKlMnOpQrS")
         self.assertEqual(r3, {"id": "1XyZ9876543210AbCdEfGhIjKlMnOpQrS", "type": "unknown"})
 
+    @patch("modules.gcp_client.shutil.which", side_effect=lambda name: f"/usr/bin/{name}")
+    def test_ensure_ffmpeg_in_path_skips_when_system_binaries_present(self, mock_which):
+        from modules.gcp_client import ensure_ffmpeg_in_path
+
+        fake_mod = unittest.mock.MagicMock()
+        with patch.dict(sys.modules, {"static_ffmpeg": fake_mod}):
+            ensure_ffmpeg_in_path()
+        fake_mod.add_paths.assert_not_called()
+        self.assertEqual(mock_which.call_count, 2)
+
+    @patch("modules.gcp_client.shutil.which", return_value=None)
+    def test_ensure_ffmpeg_in_path_adds_static_ffmpeg_when_missing(self, _mock_which):
+        from modules.gcp_client import ensure_ffmpeg_in_path
+
+        fake_mod = unittest.mock.MagicMock()
+        with patch.dict(sys.modules, {"static_ffmpeg": fake_mod}):
+            ensure_ffmpeg_in_path()
+        fake_mod.add_paths.assert_called_once_with(weak=True)
+
+    @patch("modules.gcp_client.shutil.which", return_value=None)
+    def test_ensure_ffmpeg_in_path_ignores_missing_package(self, _mock_which):
+        from modules.gcp_client import ensure_ffmpeg_in_path
+
+        with patch.dict(sys.modules, {"static_ffmpeg": None}):
+            ensure_ffmpeg_in_path()
+
 
 if __name__ == "__main__":
     unittest.main()
+

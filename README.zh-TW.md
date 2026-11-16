@@ -18,34 +18,25 @@
 
 本專案符合 [Agent Plugins 1.0](https://agent-plugins.org/) 規範，透過 **Google Cloud Application Default Credentials (ADC)** 存取 **Vertex AI**、**Cloud Speech-to-Text V2 (`chirp_3`)** 與 **Cloud Storage (GCS)**，無需管理 API Key。
 
-### 1. 安裝為 Antigravity Plugin 或 Skill
+### 1. 安裝 Antigravity Plugin
 
-- **全域 Plugin（建議）**：
-  ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
-  ```
-- **舊版單一 Skill 安裝（`~/.gemini/config/skills/`）**：
-  將儲存庫內的 `skills/subtitle-craft` 子目錄連結至舊版 Skills 目錄：
-  ```bash
-  git clone https://github.com/sylphlin/subtitle-craft.git ~/.gemini/config/plugins/subtitle-craft
-  ln -s ~/.gemini/config/plugins/subtitle-craft/skills/subtitle-craft ~/.gemini/config/skills/subtitle-craft
-  ```
+```bash
+agy plugin install https://github.com/sylphlin/subtitle-craft
+```
 
 ### 2. 安裝相依套件與配置雲端環境 (`setup.sh`)
 
-```bash
-# 1. 安裝 FFmpeg 與核心雲端 Python 套件（支援預設 Cloud Chirp 3 + Gemini）
-brew install ffmpeg
-pip install -r requirements.txt
+`requirements.txt` 已內含 `static-ffmpeg`：當本機未安裝 FFmpeg 時會自動提供跨平台 `ffmpeg` 與 `ffprobe` 執行檔；若本機已具備系統原生 FFmpeg，則優先沿用既有環境與硬體加速。
 
-# （選用）若需切換使用本機 Whisper 聲學引擎，請依硬體擇一安裝：
-# Apple Silicon Mac: pip install mlx-whisper
-# 一般 CPU / NVIDIA GPU: pip install faster-whisper
+```bash
+# 1. 安裝 Python 與媒體相依套件（支援預設 Cloud Chirp 3、Gemini 與本機選用 Whisper）
+pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 
 # 2. 授權 Google Cloud ADC 憑證
 gcloud auth application-default login
 
 # 3. 執行 setup.sh 自動啟用 Vertex AI 與 Speech-to-Text V2 API、配置 GCS 儲存桶、雙層生命週期、IAM 與 .env
+cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```
