@@ -44,9 +44,14 @@ chmod +x setup.sh
 ### Directory Structure (Agent Plugins 1.0 Specification)
 ```text
 subtitle-craft/
-├── plugin.json                                     # Agent Plugins 1.0 manifest
+├── plugin.json                                     # Antigravity plugin manifest
+├── assets/
+│   └── logo.svg                                    # Plugin vector icon
 ├── rules/
 │   └── AGENTS.md                                   # Packaged client execution rules (<PLUGIN_ROOT> direct CLI & fail-fast)
+├── .agents/
+│   └── rules/
+│       └── DEVELOPMENT.md                          # Workspace & engineering development rules (Part I & Part II)
 ├── skills/
 │   └── subtitle-craft/                             # Canonical Skill Bundle (Single Source of Truth)
 │       ├── SKILL.md                                # Antigravity skill manifest and 3-step gated runbook
@@ -55,7 +60,6 @@ subtitle-craft/
 │       │   └── modules/                            # Chirp 3 (chirp3_asr), Vertex AI (llm_client), GCS/Drive (gcp_client), and progress modules
 │       └── assets/                                 # Canonical multi-locale prompt templates (SSOT)
 │           └── subtitle_proofread_template.*.md    # Language-specific YouTube/Netflix subtitle proofreading rules
-├── AGENTS.md                                       # Workspace & engineering development rules (Part I & Part II)
 ├── setup.sh                                        # Native gcloud setup script (APIs, GCS, Lifecycle, IAM, .env)
 ├── pyproject.toml                                  # Python package metadata and optional dependencies
 ├── requirements.txt                                # Core runtime dependencies

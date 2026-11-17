@@ -61,7 +61,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 
 ## 3-Step Gated Execution Runbook
 
-Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft` or the repository root).
+Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `~/.gemini/config/plugins/subtitle-craft` or the repository root).
 
 ### Step 1: Environment & Cloud Auth Verification
 Verify that Python dependencies (`requirements.txt`, including `static-ffmpeg` or system FFmpeg), `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `pip install -r requirements.txt`, `./setup.sh --project YOUR_PROJECT_ID`, or `gcloud auth application-default login`.

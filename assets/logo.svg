@@ -1,0 +1,18 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="aiSpark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="55%" stop-color="#FBBC04"/>
+      <stop offset="100%" stop-color="#EA580C"/>
+    </linearGradient>
+    <linearGradient id="scGradA" x1="26" y1="36" x2="230" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#0284C7"/>
+    </linearGradient>
+  </defs>
+  <rect x="26" y="42" width="204" height="172" rx="28" stroke="url(#scGradA)" stroke-width="16"/>
+  <path d="M106 86L152 112L106 138V86Z" fill="url(#scGradA)"/>
+  <rect x="56" y="154" width="144" height="14" rx="7" fill="#10B981"/>
+  <rect x="76" y="178" width="104" height="14" rx="7" fill="#38BDF8"/>
+  <path d="M 190.0 58.0 Q 195.6 72.4 210.0 78.0 Q 195.6 83.6 190.0 98.0 Q 184.4 83.6 170.0 78.0 Q 184.4 72.4 190.0 58.0 Z" fill="url(#aiSpark)"/>
+</svg>

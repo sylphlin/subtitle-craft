@@ -44,9 +44,14 @@ chmod +x setup.sh
 ### 專案目錄結構（Agent Plugins 1.0 標準規範）
 ```text
 subtitle-craft/
-├── plugin.json                                     # Agent Plugins 1.0 宣告清單
+├── plugin.json                                     # Antigravity 外掛宣告清單
+├── assets/
+│   └── logo.svg                                    # 外掛向量圖示
 ├── rules/
 │   └── AGENTS.md                                   # 隨 Plugin 封裝之客戶端執行守則（唯讀、直接呼叫與 Fail-Fast）
+├── .agents/
+│   └── rules/
+│       └── DEVELOPMENT.md                          # 工作區與開發工程規範（Part I 執行守則 & Part II 開發規範）
 ├── skills/
 │   └── subtitle-craft/                             # 技能套件唯一真實來源（Single Source of Truth）
 │       ├── SKILL.md                                # 技能規範與三階段執行手冊
@@ -55,7 +60,6 @@ subtitle-craft/
 │       │   └── modules/                            # Chirp 3 (chirp3_asr)、Vertex AI (llm_client)、GCS/Drive (gcp_client) 與進度模組
 │       └── assets/                                 # 多語系字幕校對提示詞範本目錄 (SSOT)
 │           └── subtitle_proofread_template.*.md    # 支援 zh-TW, zh-CN, en, ja, ko 之 YouTube/Netflix 斷句規範
-├── AGENTS.md                                       # 工作區與開發工程規範（Part I 執行守則 & Part II 開發規範）
 ├── setup.sh                                        # 原生 gcloud 雲端環境一鍵配置腳本
 ├── pyproject.toml                                  # Python 套件定義與選用相依設定
 ├── requirements.txt                                # 核心執行期相依套件清單

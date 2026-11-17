@@ -1,6 +1,9 @@
-# Subtitle Craft — Workspace & Development Rules (AGENTS.md)
+---
+trigger: always_on
+---
+# Subtitle Craft — Workspace & Development Rules
 
-This file defines the authoritative rules for AI Coding Agents (Google Antigravity / Jetski, Claude Code, Codex, etc.) working in this repository. It covers both **Client Execution Invariants** (when running the subtitle generation pipeline for end users) and **Repository Engineering Standards** (when developing, maintaining, or extending this project).
+This file defines the authoritative rules for AI Coding Agents working in this repository. It covers both **Client Execution Invariants** (when running the subtitle generation pipeline for end users) and **Repository Engineering Standards** (when developing, maintaining, or extending this project).
 
 ---
 
@@ -10,8 +13,8 @@ This file defines the authoritative rules for AI Coding Agents (Google Antigravi
    - Execute all glossary extraction, word-level acoustic transcription (Chirp 3 or Whisper), multimodal subtitle proofreading, timestamp reprojection, and quality auditing exclusively via `skills/subtitle-craft/scripts/generate_subtitles.py`.
    - Writing temporary Python scripts or custom subtitle manipulation logic is **STRICTLY FORBIDDEN**.
 2. **Mandatory 3-Step Gated Workflow & Explicit ASR Engine Selection (Direct CLI Invocation)**:
-   - Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft`).
-   - Follow the 3-Step Runbook defined in [SKILL.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/SKILL.md):
+   - Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `~/.gemini/config/plugins/subtitle-craft`).
+   - Follow the 3-Step Runbook defined in `skills/subtitle-craft/SKILL.md`:
      - **Step 1 (Environment & Cloud Auth Verification)**: Verify Python dependencies (`requirements.txt`, including `static-ffmpeg` or system FFmpeg), `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`) from `<PLUGIN_ROOT>`.
      - **Step 2 (Pipeline Execution)**: Run `python3 skills/subtitle-craft/scripts/generate_subtitles.py` (with `Cwd` set to `<PLUGIN_ROOT>`) directly via `run_command`. Default to Cloud Speech-to-Text V2 Chirp 3 (`--asr-engine chirp3`); pass `--asr-engine whisper` **ONLY** when the user explicitly requests Whisper or local ASR in their prompt. Pass `--outline` or `--script` when the user provides an outline or reference script. By default, deliverables are isolated in `<input_dir>/output/`.
      - **Step 3 (Deliverable & `agent_verdict` Quality Gate Verification)**: Verify that `.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, and `_subtitle_report.json` exist in `<OUTPUT_DIR>` and are non-empty (`> 0 bytes`). Inspect `agent_verdict` in `_subtitle_report.json`.
@@ -28,19 +31,19 @@ This file defines the authoritative rules for AI Coding Agents (Google Antigravi
 
 When modifying code, prompts, infrastructure scripts, or documentation in this repository, you MUST adhere to the following engineering standards:
 
-### 1. Single Source of Truth (SSOT) Directory Architecture (Agent Plugins 1.0 Specification)
-- **Canonical Code Location**: All core Python scripts (`scripts/*.py`), internal modules (`scripts/modules/*.py`), and prompt templates (`assets/*.md`) physically reside inside `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/` in compliance with the [Agent Plugins 1.0 Specification](https://agent-plugins.org/specification) (§4.2 & §7.1).
+### 1. Single Source of Truth (SSOT) Directory Architecture
+- **Canonical Code Location**: All core Python scripts (`scripts/*.py`), internal modules (`scripts/modules/*.py`), and prompt templates (`assets/*.md`) physically reside inside `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/`.
 - **Rule**: Always edit files under `skills/subtitle-craft/scripts/` and `skills/subtitle-craft/assets/`. Do not create root-level symlinks or duplicate physical directories at the repository root.
 
 ### 2. Three-Stage Golden Subtitle Architecture & Acoustic Integrity
 - **Stage 1 (Vertex AI 1M Context Global Glossary — Strict Fail-Fast)**: Extracts verified speaker names, brands, and domain terminology from the full recording on GCS and produces a language-matched ASR bias prompt. Terminates immediately with exit code `1` on GCS/Vertex AI errors.
-- **Stage 2 (Dual-Engine Word-Level Acoustic Ground Truth — Default `chirp3`, Optional `whisper`)**: Extracts physical word timestamps via Google Cloud Speech-to-Text V2 `chirp_3` ([chirp3_asr.py](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/scripts/modules/chirp3_asr.py), default) or local `mlx-whisper` / `faster-whisper` (`word_timestamps=True`, `--whisper-model small` by default when `--asr-engine whisper` is selected), and caches engine-tagged `_words.json` and `_raw_whisper.srt` in `<OUTPUT_DIR>`.
+- **Stage 2 (Dual-Engine Word-Level Acoustic Ground Truth — Default `chirp3`, Optional `whisper`)**: Extracts physical word timestamps via Google Cloud Speech-to-Text V2 `chirp_3` (`skills/subtitle-craft/scripts/modules/chirp3_asr.py`, default) or local `mlx-whisper` / `faster-whisper` (`word_timestamps=True`, `--whisper-model small` by default when `--asr-engine whisper` is selected), and caches engine-tagged `_words.json` and `_raw_whisper.srt` in `<OUTPUT_DIR>`.
 - **Stage 3 (Silence-Aware Multimodal Proofreading, Multi-Pass Re-Projection & `agent_verdict` Audit)**: Splits chunks at natural speech pauses ($\ge 0.4\text{s}$), proofreads against GCS-staged audio slices (fail-fast on chunk error), normalizes multi-locale spoken numbers/symbols (`%`, `$`, `.`, `,`), clamps inflated post-silence word onsets (`_clamp_inflated_word_onset`), re-projects subtitle boundaries onto physical word timestamps using chunk-level global `difflib` milestone seeding, an elastic bidirectional window (`cur_char_idx - 15` lookback), neighbor-anchor bounded interpolation, and `source_bounds` enclosure (`realign_subtitles_to_words`), splits overlength lines via 3-tier balanced DP (`split_long_clause` + `align_split_clauses_with_words`), sanitizes reading rhythm (`sanitize_subtitle_timings` with CPS-aware adaptive $+0.4\text{s}\text{–}1.1\text{s}$ post-tail buffer capped at `media_duration + 0.4s`), and executes the 8-dimension Netflix/YouTube quality audit (`audit_subtitles_quality`) with a top-level `agent_verdict` quality gate (`acoustic_lock_rate_pct >= 80.0%`, `last_out_vs_duration_diff_sec <= 0.5s`, zero overlaps).
 
 ### 3. 100% Google Cloud Vertex AI, Cloud STT V2 (ADC) + GCS Architecture
-- **Zero API Key Policy**: All cloud invocations in [llm_client.py](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/scripts/modules/llm_client.py), [chirp3_asr.py](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/scripts/modules/chirp3_asr.py), and [gcp_client.py](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/scripts/modules/gcp_client.py) MUST authenticate via Application Default Credentials (ADC), defaulting to `GOOGLE_CLOUD_LOCATION=global`, `STT_LOCATION=us`, `TRANSCRIBE_MODEL=chirp_3`, and `SUMMARY_MODEL=gemini-3.8-flash`. Never introduce `GEMINI_API_KEY` or AI Studio File API uploads.
+- **Zero API Key Policy**: All cloud invocations in `skills/subtitle-craft/scripts/modules/llm_client.py`, `skills/subtitle-craft/scripts/modules/chirp3_asr.py`, and `skills/subtitle-craft/scripts/modules/gcp_client.py` MUST authenticate via Application Default Credentials (ADC), defaulting to `GOOGLE_CLOUD_LOCATION=global`, `STT_LOCATION=us`, `TRANSCRIBE_MODEL=chirp_3`, and `SUMMARY_MODEL=gemini-3.8-flash`. Never introduce `GEMINI_API_KEY` or AI Studio File API uploads.
 - **GCS Infrastructure & Two-Tier Lifecycle (`setup.sh`)**:
-  - Consolidate all cloud environment setup in [setup.sh](file:///Users/sylph/Documents/Antigravity/subtitle-craft/setup.sh) using native `gcloud` CLI commands (`aiplatform.googleapis.com`, `speech.googleapis.com`, `storage.googleapis.com`, `drive.googleapis.com`, `iam.googleapis.com`, `iamcredentials.googleapis.com`).
+  - Consolidate all cloud environment setup in `setup.sh` using native `gcloud` CLI commands (`aiplatform.googleapis.com`, `speech.googleapis.com`, `storage.googleapis.com`, `drive.googleapis.com`, `iam.googleapis.com`, `iamcredentials.googleapis.com`).
   - Maintain the two-tier retention policy on `gs://subtitle-craft-${PROJECT_ID}`:
     - **`raw/` prefix**: **2 days (`age: 2`)** for ephemeral staging audio (with local SHA-256 hash caching).
     - **`output/`, `deliverables/` prefixes**: **15 days (`age: 15`)** for deliverables retention.
@@ -54,5 +57,5 @@ When modifying code, prompts, infrastructure scripts, or documentation in this r
   ```
 
 ### 5. Antigravity Plugin Architecture, 5-Language Parity, & Commit Policy
-- **Plugin & README Synchronization**: Keep [plugin.json](file:///Users/sylph/Documents/Antigravity/subtitle-craft/plugin.json), [rules/AGENTS.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/rules/AGENTS.md), [skills/subtitle-craft/SKILL.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/skills/subtitle-craft/SKILL.md), and all 5 language READMEs ([README.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/README.md), [README.zh-TW.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/README.zh-TW.md), [README.zh-CN.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/README.zh-CN.md), [README.ja.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/README.ja.md), [README.ko.md](file:///Users/sylph/Documents/Antigravity/subtitle-craft/README.ko.md)) synchronized at all times.
-- **Human Authorship Only**: Author all commits as `sylphlin <sylph.lin@gmail.com>` with zero AI assistant branding or `Co-Authored-By` trailers.
+- **Plugin & README Synchronization**: Keep `plugin.json`, `rules/AGENTS.md`, `.agents/rules/DEVELOPMENT.md`, `skills/subtitle-craft/SKILL.md`, and all 5 language READMEs (`README.md`, `README.zh-TW.md`, `README.zh-CN.md`, `README.ja.md`, `README.ko.md`) synchronized at all times.
+- **Human Authorship Only**: Author all commits using the repository's configured human git user (`sylphlin`) with zero AI assistant branding or `Co-Authored-By` trailers.

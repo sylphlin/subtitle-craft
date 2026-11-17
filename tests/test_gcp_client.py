@@ -75,7 +75,7 @@ class TestGcpClient(unittest.TestCase):
     def test_is_gdrive_source(self):
         self.assertTrue(is_gdrive_source("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing"))
         self.assertTrue(is_gdrive_source("gdrive://1AbCdEfGhIjKlMnOpQrStUvWxYz123456"))
-        self.assertFalse(is_gdrive_source("/Users/sylph/Videos/interview.mp4"))
+        self.assertFalse(is_gdrive_source("/path/to/videos/interview.mp4"))
         self.assertFalse(is_gdrive_source("gs://my-bucket/raw/interview.mp4"))
         self.assertFalse(is_gdrive_source(None))
 

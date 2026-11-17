@@ -36,7 +36,7 @@ chmod +x setup.sh
 
 ### 项目目录结构（Agent Plugins 1.0 标准规范）
 - **SSOT 实体目录**：`skills/subtitle-craft/`（内含 `SKILL.md`、`scripts/generate_subtitles.py`、`scripts/modules/chirp3_asr.py`、`llm_client.py`、`gcp_client.py` 与 `assets/`）作为唯一真实来源（Single Source of Truth）。
-- **双层 `AGENTS.md` 规范**：根目录 `AGENTS.md` 定义工作区与工程开发规范（Part I & Part II），`rules/AGENTS.md` 随 Plugin 打包注入 AI 客户端执行期守则（定位 `<PLUGIN_ROOT>` 直接调用 CLI、只读与 Fail-Fast）。
+- **双层规则架构**：`.agents/rules/DEVELOPMENT.md` 定义工作区与工程开发规范（Part I & Part II），`rules/AGENTS.md` 随 Plugin 打包注入 AI 客户端执行期守则（定位 `<PLUGIN_ROOT>` 直接调用 CLI、只读与 Fail-Fast）。
 
 ---
 

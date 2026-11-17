@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "sylphlin", email = "sylph.lin@gmail.com" }
+    { name = "sylphlin" }
 ]
 keywords = [
     "subtitle-craft",

@@ -9,7 +9,7 @@ When you execute tasks or skills from this plugin, you MUST follow these operati
 - All Python scripts (`skills/subtitle-craft/scripts/*.py`), prompt templates (`skills/subtitle-craft/assets/*.md`), and configuration files are read-only tools.
 - Do NOT edit, patch, or rewrite any files in this plugin with `replace_file_content`, `write_to_file`, or shell commands.
 - Do NOT write ad-hoc temporary Python scripts, custom regex subtitle parsers, or one-off shell scripts.
-- Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `/Users/sylph/.gemini/config/plugins/subtitle-craft`).
+- Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `~/.gemini/config/plugins/subtitle-craft`).
 - Set `Cwd` to `<PLUGIN_ROOT>` and run the official script (`python3 skills/subtitle-craft/scripts/generate_subtitles.py`) directly with `run_command` using the specified arguments. Do NOT search for global CLI aliases with `find_by_name` or `list_dir`.
 
 ## 2. Explicit Engine Selection, Fail-Fast on Cloud Errors, Quality Gate (`agent_verdict`), & One-Shot Self-Healing
