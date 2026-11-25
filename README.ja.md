@@ -1,12 +1,17 @@
 # Subtitle Craft — 放送品質 AI 字幕生成＆校正スイート
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.0+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Cloud STT v2 Chirp 3](https://img.shields.io/badge/Cloud%20STT%20v2-Chirp%203-orange.svg)](https://cloud.google.com/speech-to-text)
+[![Gemini 4 Hydrogen](https://img.shields.io/badge/Gemini%204-Hydrogen-yellow.svg)](https://cloud.google.com/vertex-ai)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ---
 
 > [!IMPORTANT]
 > **Google Antigravity ネイティブプラグイン＆ワークフロースイート**  
-> 本ツールキットは **Google Antigravity** 向けのスタンドアロン 3 ステージ YouTube / Netflix 字幕生成＆品質監査スイートです。**Vertex AI Gemini 3.8 Flash** とデュアル音響タイムスタンプエンジン（デフォルト：**Google Cloud Speech-to-Text V2 `Chirp 3`**、オプション：**ローカル `Whisper`**）を組み合わせて動作します。
+> 本ツールキットは **Google Antigravity** 向けのスタンドアロン 3 ステージ YouTube / Netflix 字幕生成＆品質監査スイートです。**Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** とデュアル音響タイムスタンプエンジン（デフォルト：**Google Cloud Speech-to-Text V2 `Chirp 3`**、オプション：**ローカル `Whisper`**）を組み合わせて動作します。
 
 ---
 
@@ -16,26 +21,26 @@
 
 ## インストールと Google Cloud セットアップ (`setup.sh`)
 
-本プロジェクトは [Agent Plugins 1.0](https://agent-plugins.org/) に準拠し、**Google Cloud Application Default Credentials (ADC)** を用いて **Vertex AI**、**Cloud Speech-to-Text V2 (`chirp_3`)**、**Cloud Storage (GCS)** 上で動作します（API キー管理不要）。
+本プロジェクトは [Agent Plugins 1.0](https://agent-plugins.org/) に準拠し、**Google Cloud Application Default Credentials (ADC)** を用いて **Vertex AI (`SUMMARY_MODEL=gemini-4-hydrogen`)**、**Cloud Speech-to-Text V2 (`TRANSCRIBE_MODEL=chirp_3`)**、**Cloud Storage (GCS)** 上で動作します（API キー管理不要）。
 
-`requirements.txt` には `static-ffmpeg` が含まれており、システムに FFmpeg が未導入の場合はクロスプラットフォームの `ffmpeg` / `ffprobe` バイナリを自動提供し、導入済みの場合は既存のシステム FFmpeg を優先利用します。
+`requirements.txt` には `static-ffmpeg` が含まれます。システムに FFmpeg が未導入の場合はクロスプラットフォームの `ffmpeg` / `ffprobe` バイナリを自動提供し、導入済みの場合は既存のシステム FFmpeg を優先利用します。
 
 ```bash
 # 1. Antigravity Plugin のインストール
 agy plugin install https://github.com/sylphlin/subtitle-craft
 
-# 2. Python・メディア依存パッケージのインストールと ADC 認証
+# 2. Python・メディア依存パッケージ（Cloud Chirp 3 + Gemini 4 Hydrogen 対応）のインストールと ADC 認証
 pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 gcloud auth application-default login
 
-# 3. setup.sh を実行して Vertex AI・Speech-to-Text V2 API、GCS バケット、ライフサイクル、IAM、.env を構成
+# 3. setup.sh を実行して API、GCS バケット、ライフサイクル、IAM、.env（TRANSCRIBE_MODEL=chirp_3、SUMMARY_MODEL=gemini-4-hydrogen）を構成
 cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```
 
 ### ディレクトリ構造（Agent Plugins 1.0 準拠）
-- **SSOT 実体ディレクトリ**：`skills/subtitle-craft/`（`SKILL.md`、`scripts/generate_subtitles.py`、`scripts/modules/chirp3_asr.py`、`llm_client.py`、`gcp_client.py`、`assets/` を格納）を単一の信頼できる情報源（Single Source of Truth）として構成しています。
+- **SSOT 実体ディレクトリ**：`skills/subtitle-craft/`（`SKILL.md`、`scripts/generate_subtitles.py`、`scripts/modules/chirp3_asr.py`、`llm_client.py`［`Gemini 4 Hydrogen`］、`gcp_client.py`、`assets/` を格納）を単一の信頼できる情報源（Single Source of Truth）として構成し、`tests/` にオフライン単体テストスイート（32 件のテスト）を備えています。
 - **2 層ルール構成**：`.agents/rules/DEVELOPMENT.md` は開発・エンジニアリング規約（Part I & Part II）を定義し、`rules/AGENTS.md` はプラグインに同梱される AI クライアント実行時ルール（`<PLUGIN_ROOT>` からの直接 CLI 実行、読み取り専用、Fail-Fast）を定義します。
 
 ---
@@ -58,7 +63,7 @@ flowchart TD
 
     subgraph Stage1["Stage 1: グローバル音声解析＆用語集抽出"]
         S0["FFmpeg 音声抽出<br/>(16 kHz モノラル WAV & 48 kbps MP3)"]:::stage1Style
-        S1["Vertex AI Gemini 3.8 Flash<br/>(1M コンテキスト全編音声スキャン)"]:::stage1Style
+        S1["Vertex AI Gemini 4 Hydrogen<br/>(1M コンテキスト全編音声スキャン)"]:::stage1Style
         GL["中間アーティファクト: <basename>_glossary.md<br/>+ 音声認識バイアスプロンプト"]:::artifactStyle
     end
 
@@ -68,7 +73,7 @@ flowchart TD
     end
 
     subgraph Stage3["Stage 3: マルチモーダル音声校正＆タイムスタンプ再投影"]
-        S3_1["3.1 無音認識チャンキング＆マルチモーダル校正<br/>(Vertex AI Gemini 3.8 Flash + GCS 音声スライス)"]:::stage3Style
+        S3_1["3.1 無音認識チャンキング＆マルチモーダル校正<br/>(Vertex AI Gemini 4 Hydrogen + GCS 音声スライス)"]:::stage3Style
         S3_2["3.2 物理単語境界への再投影＆リズム最適化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
         S3_3["3.3 8 次元ストリーミング品質監査<br/>(文字数上限、CPS、句読点、重複チェック)"]:::stage3Style
     end
@@ -111,7 +116,7 @@ Antigravity では次の 2 通りの書き方が利用できます：
 2. **自然言語プロンプト**：通常の会話文で要望を入力し、`@` ファイルや Google Drive リンクを添付します。
 
 ### シナリオ 1：標準の放送・配信字幕生成（デフォルトの Cloud Chirp 3 を自動使用）
-- **ユースケース**：デフォルトの Cloud Chirp 3 で単語タイムスタンプを取得し、Gemini 3.8 Flash で同音異義語と専門用語を校正します。
+- **ユースケース**：デフォルトの Cloud Chirp 3 で単語タイムスタンプを取得し、Gemini 4 Hydrogen で同音異義語と専門用語を校正します。
 - **方法 A（`/ + @` ショートカット指定）**：
   ```text
   /subtitle-craft ファイル: @final_cut.mp4
@@ -172,10 +177,10 @@ Antigravity では次の 2 通りの書き方が利用できます：
 ## 3 ステージ技術概要
 
 - **出力ディレクトリの自動分離（`<input_dir>/output/`）**：すべての成果物およびキャッシュファイルはデフォルトで `<input_dir>/output/` に出力されます（入力元がすでに `output/` の場合はネストせずそのまま再利用します）。
-1. **Stage 1（Vertex AI 1M グローバル用語集抽出 — 厳格な Fail-Fast）**：**Gemini 3.8 Flash** で音声全体をスキャンし、`<basename>_glossary.md` と音声認識バイアスプロンプトを生成します。クラウドエラー発生時は即座に終了コード `1` で停止します。
+1. **Stage 1（Vertex AI 1M グローバル用語集抽出 — 厳格な Fail-Fast）**：**Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** の統合 `1M` トークンコンテキストウィンドウ（`thinking_level="low"` および `65,536` 出力トークン上限 `max_output_tokens=65536` により、思考トークンと出力の途切れを防止）で音声全体をスキャンし、`<basename>_glossary.md` と音声認識バイアスプロンプトを生成します。クラウドエラー発生時は即座に終了コード `1` で停止します。
 2. **Stage 2（デュアルエンジン単語レベル音響グラウンドトゥルース — デフォルト `Chirp 3`、任意 `Whisper`）**：デフォルトでは Google Cloud Speech-to-Text V2 `chirp_3`（`STT_LOCATION=us`、`enableWordTimeOffsets=True`）を実行し、プロンプトで Whisper が指定された場合はローカルの `mlx-whisper` または `faster-whisper`（デフォルト `small` モデル）を実行します。`<basename>_words.json` に使用エンジン名を記録するため、エンジン切り替え時は Stage 1 の用語集を再利用したまま Stage 2 のみを自動再実行します。
 3. **Stage 3（無音認識チャンキング、マルチパス非カスケード再投影＆`agent_verdict` 品質ゲート）**：
-   - 自然な息継ぎ（$\ge 0.4\text{s}$）で分割し、音声チャンクとグローバル用語集を参照して同音異義語を校正します。
+   - **マルチモーダル音声・テキストチャンク校正（厳格な Fail-Fast）**：自然な息継ぎ（$\ge 0.4\text{s}$）で分割し、**Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)**（統合 `1M` トークンコンテキスト、`thinking_level="low"`、`max_output_tokens=65536` 出力トークン上限により思考と SRT 出力の途切れを防止）で音声チャンクとグローバル用語集を参照して同音異義語を校正し、`finally` ブロックで一時チャンクを即時削除します。
    - **マルチパス音響再投影（`realign_subtitles_to_words`）と均衡分割（`sanitize_subtitle_timings`）**：日中韓英の口語数値、小数点（`.`）、パーセント（`%`）、通貨記号（`$`）、桁区切り（`,`）を正規化し、無音直後の過大な先頭単語開始時刻を自動クランプ（`_clamp_inflated_word_onset`）します。チャンク全体の `difflib` マイルストーン誘導、双方向弾性ウィンドウ（`cur_char_idx - 15`）、前後アンカー間の境界付き補間によって連鎖的なタイムスタンプずれを防止します。さらに 3 階層動的計画法（3-Tier DP）で長文をバランス良く分割し、CPS に応じて $+0.4\text{s}\text{–}1.1\text{s}$ の適応型読み取りバッファ（末尾上限 `media_duration + 0.4s`）と $<0.2\text{s}$ マイクロギャップ結合を適用します。
    - `<basename>_subtitle_report.json` の最上位に `agent_verdict` を出力し、品質ゲート未達時は Agent が最大 1 回の自動修復リトライを実行します。
 

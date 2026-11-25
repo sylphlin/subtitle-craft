@@ -58,7 +58,7 @@ class TestGcpClient(unittest.TestCase):
         self.assertEqual(cfg["region"], "asia-east1")
         self.assertEqual(cfg["stt_location"], "eu")
         self.assertEqual(cfg["transcribe_model"], "chirp_3")
-        self.assertEqual(cfg["summary_model"], "gemini-3.8-flash")
+        self.assertEqual(cfg["summary_model"], "gemini-4-hydrogen")
 
     @patch("modules.gcp_client._parse_env_file", return_value={"TRANSCRIBE_MODEL": "whisper-large"})
     @patch.dict(os.environ, {"GOOGLE_CLOUD_PROJECT": "auto-proj"}, clear=True)
@@ -70,7 +70,7 @@ class TestGcpClient(unittest.TestCase):
         self.assertEqual(cfg["region"], "us-central1")
         self.assertEqual(cfg["stt_location"], "us")
         self.assertEqual(cfg["transcribe_model"], "chirp_3")
-        self.assertEqual(cfg["summary_model"], "gemini-3.8-flash")
+        self.assertEqual(cfg["summary_model"], "gemini-4-hydrogen")
 
     def test_is_gdrive_source(self):
         self.assertTrue(is_gdrive_source("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz123456/view?usp=sharing"))
@@ -114,6 +114,42 @@ class TestGcpClient(unittest.TestCase):
 
         with patch.dict(sys.modules, {"static_ffmpeg": None}):
             ensure_ffmpeg_in_path()
+
+    @patch("modules.llm_client.get_vertex_client")
+    @patch(
+        "modules.llm_client.resolve_gcp_config",
+        return_value={
+            "project": "test-proj",
+            "bucket": "subtitle-craft-test-proj",
+            "location": "global",
+            "region": "us-central1",
+        },
+    )
+    def test_call_vertex_generate_content_gemini_4_hydrogen_config(self, _mock_cfg, mock_get_client):
+        from modules.llm_client import call_vertex_generate_content
+
+        mock_client = unittest.mock.MagicMock()
+        mock_resp = unittest.mock.MagicMock()
+        mock_resp.text = "proofread result"
+        mock_client.models.generate_content.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        output = call_vertex_generate_content(
+            prompt="Test prompt",
+            model="gemini-4-hydrogen",
+            thinking_budget=0,
+        )
+        self.assertEqual(output, "proofread result")
+        mock_client.models.generate_content.assert_called_once()
+
+        call_kwargs = mock_client.models.generate_content.call_args.kwargs
+        self.assertEqual(call_kwargs["model"], "gemini-4-hydrogen")
+        config = call_kwargs["config"]
+        self.assertEqual(config.max_output_tokens, 65536)
+        self.assertIsNone(config.temperature)
+        self.assertIsNotNone(config.thinking_config)
+        level_val = getattr(config.thinking_config.thinking_level, "value", config.thinking_config.thinking_level)
+        self.assertEqual(str(level_val).lower(), "low")
 
 
 if __name__ == "__main__":

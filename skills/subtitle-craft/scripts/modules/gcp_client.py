@@ -195,7 +195,7 @@ def resolve_gcp_config(
     if not transcribe_model or not str(transcribe_model).lower().startswith("chirp"):
         transcribe_model = "chirp_3"
     if not summary_model:
-        summary_model = "gemini-3.8-flash"
+        summary_model = "gemini-4-hydrogen"
 
     return {
         "project": project,

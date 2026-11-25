@@ -1,12 +1,17 @@
 # Subtitle Craft — Broadcast-Grade AI Subtitle Suite
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.0+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Cloud STT v2 Chirp 3](https://img.shields.io/badge/Cloud%20STT%20v2-Chirp%203-orange.svg)](https://cloud.google.com/speech-to-text)
+[![Gemini 4 Hydrogen](https://img.shields.io/badge/Gemini%204-Hydrogen-yellow.svg)](https://cloud.google.com/vertex-ai)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ---
 
 > [!IMPORTANT]
 > **Google Antigravity Native Plugin & Workflow Suite**  
-> This toolkit provides a standalone 3-stage YouTube and Netflix subtitle workflow for **Google Antigravity**, powered by **Vertex AI Gemini 3.8 Flash** and dual word-level acoustic engines (Default: **Google Cloud Speech-to-Text V2 `Chirp 3`**; Optional: **Local `Whisper`**).
+> This toolkit provides a standalone 3-stage YouTube and Netflix subtitle workflow for **Google Antigravity**, powered by **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** and dual word-level acoustic engines (Default: **Google Cloud Speech-to-Text V2 `Chirp 3`**; Optional: **Local `Whisper`**).
 
 ---
 
@@ -16,7 +21,7 @@
 
 ## Installation & Google Cloud Setup (`setup.sh`)
 
-This project complies with [Agent Plugins 1.0](https://agent-plugins.org/) and authenticates with **Google Cloud Application Default Credentials (ADC)** across **Vertex AI**, **Cloud Speech-to-Text V2 (`chirp_3`)**, and **Cloud Storage (GCS)**. Do not create or store API key files.
+This project complies with [Agent Plugins 1.0](https://agent-plugins.org/) and authenticates with **Google Cloud Application Default Credentials (ADC)** across **Vertex AI (`SUMMARY_MODEL=gemini-4-hydrogen`)**, **Cloud Speech-to-Text V2 (`TRANSCRIBE_MODEL=chirp_3`)**, and **Cloud Storage (GCS)**. Do not create or store API key files.
 
 ### 1. Install the Antigravity Plugin
 
@@ -26,16 +31,16 @@ agy plugin install https://github.com/sylphlin/subtitle-craft
 
 ### 2. Install Python Dependencies and Provision Cloud Resources (`setup.sh`)
 
-`requirements.txt` includes `static-ffmpeg`, which automatically provides cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is not installed, while preserving native system FFmpeg when present.
+`requirements.txt` includes `static-ffmpeg`. It provides cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is absent, and preserves native system FFmpeg when installed.
 
 ```bash
-# 1. Install core Python and media dependencies (supports default Cloud Chirp 3 + Gemini)
+# 1. Install core Python and media dependencies (Cloud STT V2 Chirp 3 + Vertex AI Gemini 4 Hydrogen)
 pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 
 # 2. Authenticate Application Default Credentials (ADC)
 gcloud auth application-default login
 
-# 3. Enable Vertex AI & Speech-to-Text V2 APIs, provision GCS bucket, lifecycle rules, IAM, and .env
+# 3. Enable APIs, provision GCS bucket, lifecycle rules, IAM, and .env (TRANSCRIBE_MODEL=chirp_3, SUMMARY_MODEL=gemini-4-hydrogen)
 cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
@@ -57,14 +62,14 @@ subtitle-craft/
 │       ├── SKILL.md                                # Antigravity skill manifest and 3-step gated runbook
 │       ├── scripts/                                # Canonical execution scripts & modules (SSOT)
 │       │   ├── generate_subtitles.py               # 3-stage subtitle pipeline & 8-dimension quality audit
-│       │   └── modules/                            # Chirp 3 (chirp3_asr), Vertex AI (llm_client), GCS/Drive (gcp_client), and progress modules
+│       │   └── modules/                            # Chirp 3 (chirp3_asr), Gemini 4 Hydrogen (llm_client), GCS/Drive (gcp_client), and progress modules
 │       └── assets/                                 # Canonical multi-locale prompt templates (SSOT)
 │           └── subtitle_proofread_template.*.md    # Language-specific YouTube/Netflix subtitle proofreading rules
 ├── setup.sh                                        # Native gcloud setup script (APIs, GCS, Lifecycle, IAM, .env)
 ├── pyproject.toml                                  # Python package metadata and optional dependencies
 ├── requirements.txt                                # Core runtime dependencies
 ├── .env.example                                    # Vertex AI, Cloud STT V2, and GCS configuration template
-└── tests/                                          # Offline unit test suite
+└── tests/                                          # Offline unit test suite (32 tests)
 ```
 
 ---
@@ -87,7 +92,7 @@ flowchart TD
 
     subgraph Stage1["Stage 1: Global Audio Context & Glossary"]
         S0["FFmpeg Audio Extraction<br/>(16 kHz Mono WAV & 48 kbps MP3)"]:::stage1Style
-        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Token Full-Audio Scan via GCS)"]:::stage1Style
+        S1["Vertex AI Gemini 4 Hydrogen<br/>(1M Token Full-Audio Scan via GCS)"]:::stage1Style
         GL["Artifact: <basename>_glossary.md<br/>+ ASR Bias Prompt"]:::artifactStyle
     end
 
@@ -97,7 +102,7 @@ flowchart TD
     end
 
     subgraph Stage3["Stage 3: Multimodal Proofreading & Re-Projection"]
-        S3_1["3.1 Silence-Aware Chunked Proofreading<br/>(Vertex AI Gemini 3.8 Flash + GCS Audio Slices)"]:::stage3Style
+        S3_1["3.1 Silence-Aware Chunked Proofreading<br/>(Vertex AI Gemini 4 Hydrogen + GCS Audio Slices)"]:::stage3Style
         S3_2["3.2 Physical Word-Boundary Re-Projection<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
         S3_3["3.3 8-Dimension Streaming Quality Audit<br/>(CPS, Line Length, Punctuation, Overlaps)"]:::stage3Style
     end
@@ -140,7 +145,7 @@ Use either prompt format in Antigravity:
 2. **Natural Language Prompt**: State your request in plain language and attach `@` files or Google Drive links.
 
 ### Scenario 1: Standard Broadcast Subtitles (Uses Default Cloud Chirp 3)
-- **Use Case**: Generate `.srt` and `.vtt` subtitles with default Cloud Chirp 3 word timestamps and Gemini 3.8 Flash terminology proofreading.
+- **Use Case**: Generate `.srt` and `.vtt` subtitles with default Cloud Chirp 3 word timestamps and Gemini 4 Hydrogen terminology proofreading.
 - **Mode A (`/ + @` Concise Command)**:
   ```text
   /subtitle-craft File: @final_cut.mp4
@@ -204,7 +209,8 @@ Use either prompt format in Antigravity:
 - All final and intermediate deliverables (`.srt`, `.vtt`, `_glossary.md`, `_raw_whisper.srt`, `_words.json`, `_subtitle_report.md`, `_subtitle_report.json`) are saved inside `<input_dir>/output/`. If `<input_dir>` is already named `output`, the directory is reused without creating `output/output/`.
 
 ### Stage 1: Global Audio Context & Consistency Glossary (Strict Fail-Fast)
-- Compresses full episode audio to 48 kbps mono MP3, uploads it to `gs://subtitle-craft-${PROJECT_ID}/raw/`, and scans the full recording with **Vertex AI Gemini 3.8 Flash** (`1M` token context).
+- Compresses full episode audio to 48 kbps mono MP3 and uploads it to `gs://subtitle-craft-${PROJECT_ID}/raw/`.
+- Scans the full recording with **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** on a unified `1M` token context window with `thinking_level="low"` and a `65,536` output token limit (`max_output_tokens=65536`) so combined thinking and glossary output never truncate.
 - Produces `<basename>_glossary.md` and extracts a compact ASR bias prompt ($\le 145$ characters) matched to the target language (`zh-TW`, `zh-CN`, `en`, `ja`, `ko`).
 - Stops immediately with exit code `1` and prints remediation steps if GCS upload or Vertex AI inference fails.
 
@@ -215,7 +221,7 @@ Use either prompt format in Antigravity:
 
 ### Stage 3: Silence-Aware Multimodal Proofreading, Non-Cascading Re-Projection & `agent_verdict` Audit
 1. **Silence-Aware Semantic Chunking**: Splits SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$) to prevent mid-sentence cuts across chunk boundaries.
-2. **Multimodal Audio-Text Proofreading (Strict Fail-Fast)**: Slices the audio segment for each chunk, uploads it to `gs://<bucket>/raw/audio_chunks/`, proofreads against both the audio waveform and Global Glossary, and deletes the remote chunk in a `finally` block. Any chunk failure cancels pending workers and exits with code `1`.
+2. **Multimodal Audio-Text Proofreading (Strict Fail-Fast)**: Slices each audio chunk, uploads it to `gs://<bucket>/raw/audio_chunks/`, and proofreads against the audio waveform and Global Glossary with **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)**. Runs on a unified `1M` token context window with `thinking_level="low"` and a `65,536` output token limit (`max_output_tokens=65536`) so combined thinking and SRT output never truncate. Deletes each remote chunk in a `finally` block, cancels pending workers on error, and exits with code `1`.
 3. **Multi-Pass Word-Boundary Re-Projection & Balanced Pacing**:
    - Normalizes spoken numerals, decimals (`.`), percentages (`%`), currencies (`$`), and thousand separators (`,`) across CJK, Korean, and English while clamping inflated post-silence word onsets (`_clamp_inflated_word_onset`).
    - Projects proofread subtitle lines onto physical character timestamps (`realign_subtitles_to_words`) using chunk-level `difflib` milestone seeding, an elastic bidirectional window (`cur_char_idx - 15` lookback), and neighbor-anchor bounded interpolation onto unconsumed characters.

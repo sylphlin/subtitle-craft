@@ -66,12 +66,12 @@ def call_vertex_generate_content(
     location=None,
     gcs_bucket=None,
     region=None,
-    model="gemini-3.8-flash",
+    model="gemini-4-hydrogen",
     gcs_uri=None,
     audio_path=None,
     cleanup_ephemeral_audio=True,
     temperature=0.1,
-    max_tokens=8192,
+    max_tokens=65536,
     thinking_budget=None,
     max_retries=5,
 ):
@@ -128,9 +128,21 @@ def call_vertex_generate_content(
         contents.append(types.Part.from_uri(file_uri=effective_gcs_uri, mime_type=mime))
     contents.append(prompt)
 
-    config_params = {"temperature": temperature, "max_output_tokens": max_tokens}
-    if thinking_budget is not None and ("3.7" in model or "3.8" in model):
-        config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+    if "gemini-4" in model.lower():
+        # Set unified output cap and map thinking budget to Gemini 4 thinking level.
+        config_params = {"max_output_tokens": max_tokens}
+        if thinking_budget is not None:
+            if thinking_budget <= 2048:
+                thinking_level = "low"
+            elif thinking_budget <= 4096:
+                thinking_level = "medium"
+            else:
+                thinking_level = "high"
+            config_params["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+    else:
+        config_params = {"temperature": temperature, "max_output_tokens": max_tokens}
+        if thinking_budget is not None and ("3.7" in model or "3.8" in model):
+            config_params["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
     config = types.GenerateContentConfig(**config_params)
 
     try:
@@ -165,7 +177,7 @@ def call_vertex_generate_content(
 
 def call_llm(
     prompt,
-    model="gemini-3.8-flash",
+    model="gemini-4-hydrogen",
     project=None,
     location=None,
     gcs_bucket=None,
@@ -174,7 +186,7 @@ def call_llm(
     audio_path=None,
     cleanup_ephemeral_audio=True,
     temperature=0.1,
-    max_tokens=8192,
+    max_tokens=65536,
     thinking_budget=None,
 ):
     """Call Vertex AI Gemini API via ADC and GCS."""

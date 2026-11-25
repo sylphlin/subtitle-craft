@@ -44,7 +44,7 @@ REGION="${GCP_REGION:-us-central1}"
 LOCATION="${GOOGLE_CLOUD_LOCATION:-global}"
 STT_LOCATION="${STT_LOCATION:-us}"
 TRANSCRIBE_MODEL="${TRANSCRIBE_MODEL:-chirp_3}"
-SUMMARY_MODEL="${SUMMARY_MODEL:-gemini-3.8-flash}"
+SUMMARY_MODEL="${SUMMARY_MODEL:-gemini-4-hydrogen}"
 BUCKET_NAME="${SUBTITLE_CRAFT_BUCKET:-${GCS_BUCKET:-}}"
 SERVICE_ACCOUNT="${GCP_SERVICE_ACCOUNT:-${SERVICE_ACCOUNT:-}}"
 DRY_RUN=false
@@ -62,7 +62,7 @@ Environment Variables (.env or shell):
   GCP_REGION                          GCS Bucket region (default: us-central1)
   STT_LOCATION                        Cloud STT V2 Chirp 3 multi-region (default: us)
   TRANSCRIBE_MODEL                    Cloud STT V2 ASR model (default: chirp_3)
-  SUMMARY_MODEL                       Vertex AI Gemini model (default: gemini-3.8-flash)
+  SUMMARY_MODEL                       Vertex AI Gemini model (default: gemini-4-hydrogen)
   SUBTITLE_CRAFT_BUCKET / GCS_BUCKET  GCS bucket name (default: subtitle-craft-\${PROJECT_ID})
   GCP_SERVICE_ACCOUNT                 Optional custom Service Account
 

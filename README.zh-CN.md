@@ -1,12 +1,17 @@
 # Subtitle Craft — 影视级 AI 智能字幕生成与校对套件
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.0+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Cloud STT v2 Chirp 3](https://img.shields.io/badge/Cloud%20STT%20v2-Chirp%203-orange.svg)](https://cloud.google.com/speech-to-text)
+[![Gemini 4 Hydrogen](https://img.shields.io/badge/Gemini%204-Hydrogen-yellow.svg)](https://cloud.google.com/vertex-ai)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ---
 
 > [!IMPORTANT]
 > **Google Antigravity 原生技能与工作流套件**  
-> 本工具集为 **Google Antigravity** 打造独立的三阶段 YouTube / Netflix 字幕生成与质量审核工作流，结合 **Vertex AI Gemini 3.8 Flash** 与双声学时间轴引擎（默认：**Google Cloud Speech-to-Text V2 `Chirp 3`**；可选：**本地 `Whisper`**）。
+> 本工具集为 **Google Antigravity** 打造独立的三阶段 YouTube / Netflix 字幕生成与质量审核工作流，结合 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** 与双声学时间轴引擎（默认：**Google Cloud Speech-to-Text V2 `Chirp 3`**；可选：**本地 `Whisper`**）。
 
 ---
 
@@ -16,26 +21,26 @@
 
 ## 安装与 Google Cloud 环境配置 (`setup.sh`)
 
-本项目遵循 [Agent Plugins 1.0](https://agent-plugins.org/) 规范，通过 **Google Cloud Application Default Credentials (ADC)** 访问 **Vertex AI**、**Cloud Speech-to-Text V2 (`chirp_3`)** 与 **Cloud Storage (GCS)**，无需管理 API Key。
+本项目遵循 [Agent Plugins 1.0](https://agent-plugins.org/) 规范，通过 **Google Cloud Application Default Credentials (ADC)** 访问 **Vertex AI (`SUMMARY_MODEL=gemini-4-hydrogen`)**、**Cloud Speech-to-Text V2 (`TRANSCRIBE_MODEL=chirp_3`)** 与 **Cloud Storage (GCS)**，无需管理 API Key。
 
-`requirements.txt` 已包含 `static-ffmpeg`：若本机未安装 FFmpeg，会自动提供跨平台 `ffmpeg` 与 `ffprobe` 可执行文件；若本机已安装原生 FFmpeg，则优先沿用系统环境。
+`requirements.txt` 包含 `static-ffmpeg`。若本机未安装 FFmpeg，会自动提供跨平台 `ffmpeg` 与 `ffprobe` 可执行文件；若本机已安装原生 FFmpeg，则优先沿用系统环境。
 
 ```bash
 # 1. 安装 Antigravity Plugin
 agy plugin install https://github.com/sylphlin/subtitle-craft
 
-# 2. 安装 Python 与媒体依赖（含默认 Cloud Chirp 3、Gemini 与可选本地 Whisper）并授权 ADC
+# 2. 安装 Python 与媒体依赖（支持默认 Cloud Chirp 3、Gemini 4 Hydrogen 与可选本地 Whisper）并授权 ADC
 pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 gcloud auth application-default login
 
-# 3. 运行 setup.sh 自动启用 Vertex AI 与 Speech-to-Text V2 API、配置 GCS 存储桶、生命周期规则、IAM 与 .env
+# 3. 运行 setup.sh 自动启用 API、配置 GCS 存储桶、生命周期规则、IAM 与 .env（TRANSCRIBE_MODEL=chirp_3、SUMMARY_MODEL=gemini-4-hydrogen）
 cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
 ```
 
 ### 项目目录结构（Agent Plugins 1.0 标准规范）
-- **SSOT 实体目录**：`skills/subtitle-craft/`（内含 `SKILL.md`、`scripts/generate_subtitles.py`、`scripts/modules/chirp3_asr.py`、`llm_client.py`、`gcp_client.py` 与 `assets/`）作为唯一真实来源（Single Source of Truth）。
+- **SSOT 实体目录**：`skills/subtitle-craft/`（内含 `SKILL.md`、`scripts/generate_subtitles.py`、`scripts/modules/chirp3_asr.py`、`llm_client.py`［`Gemini 4 Hydrogen`］、`gcp_client.py` 与 `assets/`）作为唯一真实来源（Single Source of Truth），并附带 `tests/` 离线单元测试套件（32 项测试）。
 - **双层规则架构**：`.agents/rules/DEVELOPMENT.md` 定义工作区与工程开发规范（Part I & Part II），`rules/AGENTS.md` 随 Plugin 打包注入 AI 客户端执行期守则（定位 `<PLUGIN_ROOT>` 直接调用 CLI、只读与 Fail-Fast）。
 
 ---
@@ -58,7 +63,7 @@ flowchart TD
 
     subgraph Stage1["Stage 1: 全局音频扫描与术语表"]
         S0["FFmpeg 音频提取<br/>(16 kHz 单声道 WAV & 48 kbps MP3)"]:::stage1Style
-        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Context 全片音频扫描)"]:::stage1Style
+        S1["Vertex AI Gemini 4 Hydrogen<br/>(1M Context 全片音频扫描)"]:::stage1Style
         GL["中间产物: <basename>_glossary.md<br/>+ 语音识别引导词"]:::artifactStyle
     end
 
@@ -68,7 +73,7 @@ flowchart TD
     end
 
     subgraph Stage3["Stage 3: 多模态音频校对与时间重投影"]
-        S3_1["3.1 静音感知分块与多模态音频校对<br/>(Vertex AI Gemini 3.8 Flash + GCS 音频切片)"]:::stage3Style
+        S3_1["3.1 静音感知分块与多模态音频校对<br/>(Vertex AI Gemini 4 Hydrogen + GCS 音频切片)"]:::stage3Style
         S3_2["3.2 物理词边界时间重投影与节奏净化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
         S3_3["3.3 8 维度流媒体质量审核<br/>(单行字数、阅读语速 CPS、标点与重叠检查)"]:::stage3Style
     end
@@ -111,7 +116,7 @@ Stage 2 支持两种逐词声学时间轴引擎。无需输入任何命令行参
 2. **自然语言描述**：直接用口语描述需求并附上 `@` 文件或 Google Drive 链接。
 
 ### 场景 1：标准影视级字幕生成（自动使用默认 Cloud Chirp 3）
-- **适用场景**：使用默认云端 Chirp 3 获取逐词时间戳，并由 Gemini 3.8 Flash 校对同音字与技术术语。
+- **适用场景**：使用默认云端 Chirp 3 获取逐词时间戳，并由 Gemini 4 Hydrogen 校对同音字与技术术语。
 - **方式 A（`/ + @` 极简指令）**：
   ```text
   /subtitle-craft 文件: @final_cut.mp4
@@ -172,10 +177,10 @@ Stage 2 支持两种逐词声学时间轴引擎。无需输入任何命令行参
 ## 三阶段核心技术说明
 
 - **输出目录自动隔离（`<input_dir>/output/`）**：系统默认将所有最终与中间产物保存在 `<input_dir>/output/` 子目录中（若输入文件已位于 `output/` 目录则直接复用，避免嵌套 `output/output/`）。
-1. **Stage 1（Vertex AI 1M 全局术语表与语音识别引导词 — 严格 Fail-Fast）**：使用 **Gemini 3.8 Flash** 扫描全片音频，生成 `<basename>_glossary.md` 与 $\le 145$ 字符的引导词；遇到云端异常立即以退出码 `1` 终止并输出修复指引。
+1. **Stage 1（Vertex AI 1M 全局术语表与语音识别引导词 — 严格 Fail-Fast）**：通过 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** 在统一 `1M` Token 上下文窗口下扫描全片音频（配置 `thinking_level="low"` 与 `65,536` 输出 Token 上限 `max_output_tokens=65536`，确保思考过程与术语表输出绝不截断），生成 `<basename>_glossary.md` 与 $\le 145$ 字符的引导词；遇到云端异常立即以退出码 `1` 终止并输出修复指引。
 2. **Stage 2（双引擎毫秒级逐词时间戳 — 默认 `Chirp 3`、可选 `Whisper`）**：默认调用 Google Cloud Speech-to-Text V2 `chirp_3`（`STT_LOCATION=us`、`enableWordTimeOffsets=True`）提取逐词时间偏移；当用户在提示词中指定 Whisper 时切换运行本地 `mlx-whisper` 或 `faster-whisper`（默认 `small` 模型）。缓存文件 `<basename>_words.json` 记录引擎标识，切换引擎时自动刷新 Stage 2 并复用 Stage 1 术语表。
 3. **Stage 3（静音感知分块、防级联漂移重投影与 `agent_verdict` 质量门禁）**：
-   - 在自然停顿处（$\ge 0.4\text{s}$）切分块，结合音频切片与全局术语表校对同音字与术语。
+   - **多模态音频分块校对（严格 Fail-Fast）**：在自然停顿处（$\ge 0.4\text{s}$）切分块，通过 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)**（统一 `1M` Token 上下文窗口、`thinking_level="low"`、`max_output_tokens=65536` 输出上限，确保思考与 SRT 字幕输出绝不截断）结合音频切片与全局术语表校对同音字与术语，完成后在 `finally` 块中立即清理远程切片。
    - **多阶段防漂移声学重投影（`realign_subtitles_to_words`）与均衡断句（`sanitize_subtitle_timings`）**：支持中、日、韩、英口语数字、小数点（`.`）、百分比（`%`）、货币（`$`）与千分位（`,`）双向归一化对齐，自动收敛停顿后异常拉长的首词起点（`_clamp_inflated_word_onset`）；通过分块级 `difflib` 全局里程碑锚定、双向弹性字符窗口（`cur_char_idx - 15` 回溯）与前后锚点有界插值消除级联漂移；采用 3 层动态规划（3-Tier DP）均衡切分超长句，按阅读速度（CPS）在停顿处动态延伸 $+0.4\text{s}\text{–}1.1\text{s}$ 阅读缓冲（片尾上限 `media_duration + 0.4s`），并自动桥接 $<0.2\text{s}$ 微小间隙。
    - 在 `<basename>_subtitle_report.json` 顶层输出 `agent_verdict` 质量门禁（未通过门禁时由 Agent 执行最多 1 次自动修复重试）。
 

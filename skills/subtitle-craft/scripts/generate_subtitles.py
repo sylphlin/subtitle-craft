@@ -10,7 +10,7 @@ Three-Stage Golden Pipeline:
            acronyms, and domain jargon. Merges optional user outlines (--outline) and scripts (--script).
   Stage 2: Zero-Drift Acoustic Transcription via Whisper (mlx-whisper / faster-whisper).
            Extracts physical word-level timestamps (word_timestamps=True) with zero drift.
-  Stage 3: Multimodal Audio-Text Chunked Proofreading (Vertex AI Gemini 3.8 Flash + GCS).
+  Stage 3: Multimodal Audio-Text Chunked Proofreading (Vertex AI Gemini 4 Hydrogen + GCS).
            Slices audio at natural pauses, proofreads subtitles against audio slices and the Global Glossary,
            re-projects timestamps onto Whisper word boundaries, and runs an 8-dimension quality audit.
 
@@ -462,7 +462,7 @@ def extract_whisper_prompt(glossary_text, max_chars=145, language="zh-TW"):
 
 
 def extract_global_glossary(audio_wav=None, segments=None, user_outline=None, user_script=None,
-                            model="gemini-3.8-flash", project=None, gcs_bucket=None,
+                            model="gemini-4-hydrogen", project=None, gcs_bucket=None,
                             location=None, region=None, cleanup_gcs=False, language="auto"):
     """
     Stage 1: Global Audio Context and Consistency Glossary Extraction (Vertex AI Gemini 1M Context Scan).
@@ -539,7 +539,7 @@ def extract_global_glossary(audio_wav=None, segments=None, user_outline=None, us
                     region=region,
                     gcs_uri=gcs_audio_uri,
                     temperature=0.1,
-                    max_tokens=4096,
+                    max_tokens=65536,
                     thinking_budget=0,
                 )
             duration = time.time() - t0
@@ -1054,7 +1054,7 @@ def align_split_clauses_with_words(final_parts, t_start, t_end, all_words=None):
 
 
 def proofread_single_chunk(c_idx, num_chunks, chunk_slice, template, global_glossary, audio_wav,
-                           model="gemini-3.8-flash", user_script=None,
+                           model="gemini-4-hydrogen", user_script=None,
                            project=None, location=None, gcs_bucket=None, region=None,
                            max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42):
     """Proofread a single chunk of SRT blocks with a GCS-staged audio slice and optional reference script."""
@@ -1110,7 +1110,7 @@ def proofread_single_chunk(c_idx, num_chunks, chunk_slice, template, global_glos
             audio_path=chunk_mp3_path,
             cleanup_ephemeral_audio=True,
             temperature=0.1,
-            max_tokens=8192,
+            max_tokens=65536,
             thinking_budget=0,
         )
 
@@ -1774,7 +1774,7 @@ def sanitize_subtitle_timings(raw_srt, all_words=None, min_duration=1.0, max_dur
 
 
 def proofread_srt_with_llm(raw_srt, audio_wav=None, global_glossary=None, user_script=None,
-                           model="gemini-3.8-flash", chunk_size=80,
+                           model="gemini-4-hydrogen", chunk_size=80,
                            max_workers=5, language="zh-TW", all_words=None, cache_path=None,
                            project=None, location=None, gcs_bucket=None, region=None,
                            max_chars_cjk=15, max_chars_korean=16, max_chars_latin=42,
@@ -2407,7 +2407,7 @@ def main():
     parser.add_argument("--whisper-model", default="small", choices=["tiny", "base", "small", "medium", "large-v3"],
                         help="Whisper model size when --asr-engine=whisper (default: small)")
     parser.add_argument("--model", default=None,
-                        help="Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (default: gemini-3.8-flash)")
+                        help="Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (default: gemini-4-hydrogen)")
     parser.add_argument("--project", default=None,
                         help="Google Cloud Project ID for Vertex AI / GCS (or set GOOGLE_CLOUD_PROJECT in .env)")
     parser.add_argument("--gcs-bucket", "--bucket", dest="gcs_bucket", default=None,
@@ -2444,7 +2444,7 @@ def main():
         cli_region=args.region,
         cli_stt_location=args.stt_location,
     )
-    args.model = args.model or gcp_cfg.get("summary_model") or "gemini-3.8-flash"
+    args.model = args.model or gcp_cfg.get("summary_model") or "gemini-4-hydrogen"
 
     if not gcp_cfg.get("project") or not gcp_cfg.get("bucket"):
         print("\n[Error] Missing Google Cloud Project ID or GCS Bucket for Vertex AI!", file=sys.stderr)

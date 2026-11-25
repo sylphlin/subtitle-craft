@@ -2,7 +2,7 @@
 name: subtitle-craft
 description: >
   Broadcast-grade YouTube & Netflix subtitle generator (SRT & VTT) adhering to the Agent Plugins 1.0 Specification.
-  Executes a 3-Stage Golden Pipeline: (1) Vertex AI Gemini 3.8 Flash 1M Context Global Glossary & Initial Prompt extraction,
+  Executes a 3-Stage Golden Pipeline: (1) Vertex AI Gemini 4 Hydrogen 1M Context Global Glossary & Initial Prompt extraction,
   (2) Dual-engine word-level acoustic transcription (default: Google Cloud Speech-to-Text V2 Chirp 3; optional: local Apple Silicon MLX / faster-whisper),
   and (3) Silence-aware chunked multimodal audio proofreading via Google Cloud Vertex AI (ADC) + GCS with physical word-boundary
   timestamp reprojection, rhythm sanitization, and an 8-dimension streaming quality audit.
@@ -11,17 +11,17 @@ description: >
 
 # Subtitle Craft — Broadcast-Grade AI Subtitle Suite (Antigravity Native Skill)
 
-Standalone end-to-end toolkit for generating millisecond-accurate, terminology-verified **YouTube and Netflix subtitles (`.srt` and `.vtt`)** from local or Google Drive video and audio files. Powered by **Google Cloud Vertex AI Gemini 3.8 Flash (1M Token Context via ADC + GCS)** and **Dual-Engine Word-Level Acoustic Ground Truth (Default: Cloud Speech-to-Text V2 `Chirp 3`; Optional: Local `Whisper`)**.
+Standalone end-to-end toolkit for generating millisecond-accurate, terminology-verified **YouTube and Netflix subtitles (`.srt` and `.vtt`)** from local or Google Drive video and audio files. Powered by **Google Cloud Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`, unified `1M` token context via ADC + GCS)** and **Dual-Engine Word-Level Acoustic Ground Truth (Default: Cloud Speech-to-Text V2 `Chirp 3`; Optional: Local `Whisper`)**.
 
 ---
 
 ## Prerequisites & Environment
 
 - **Google Antigravity IDE / Agent Framework**
-- **Python 3.9+** with `google-genai`, `google-cloud-storage`, `google-auth`, `requests`, and `static-ffmpeg` via `requirements.txt` (`static-ffmpeg` automatically supplies cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is not installed, while preserving native system FFmpeg when present; optional local Whisper backend: `mlx-whisper` on Apple Silicon or `faster-whisper`)
+- **Python 3.9+** with `google-genai`, `google-cloud-storage`, `google-auth`, `requests`, and `static-ffmpeg` via `requirements.txt`. `static-ffmpeg` supplies cross-platform `ffmpeg` and `ffprobe` binaries when system FFmpeg is absent, and preserves native system FFmpeg when present. Optional local Whisper backend: `mlx-whisper` on Apple Silicon or `faster-whisper`.
 - **Cloud Credentials (100% ADC + Vertex AI, Cloud STT V2 & GCS)**:
-  - Authenticate via `gcloud auth application-default login`
-  - Run `./setup.sh` once to enable Vertex AI and Cloud Speech-to-Text V2 (`speech.googleapis.com`), provision the GCS bucket (`gs://subtitle-craft-${GOOGLE_CLOUD_PROJECT}`), configure two-tier Lifecycle auto-cleanup rules (`raw/` staging: 2 days; `output/`, `deliverables/`: 15 days), bind Vertex AI and Speech Service Agent IAM (`roles/storage.objectUser`), and generate `.env`.
+  - Authenticate via `gcloud auth application-default login`.
+  - Run `./setup.sh` once to enable Vertex AI and Cloud Speech-to-Text V2 (`speech.googleapis.com`), provision the GCS bucket (`gs://subtitle-craft-${GOOGLE_CLOUD_PROJECT}`), apply two-tier Lifecycle rules (`raw/`: 2 days; `output/`, `deliverables/`: 15 days), bind IAM roles (`roles/storage.objectUser`), and write `.env` (`TRANSCRIBE_MODEL=chirp_3`, `SUMMARY_MODEL=gemini-4-hydrogen`).
 
 ---
 
@@ -31,7 +31,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 | :--- | :--- | :--- |
 | **CLI Entrypoint** | `scripts/generate_subtitles.py` | Executes the 3-Stage Golden Subtitle Pipeline and 8-Dimension Quality Audit |
 | **Chirp 3 ASR Engine** | `scripts/modules/chirp3_asr.py` | Cloud Speech-to-Text V2 (`chirp_3`) batch recognition, silence chunking, and word-offset extraction |
-| **Vertex AI Client** | `scripts/modules/llm_client.py` | Vertex AI Gemini 3.8 Flash multimodal inference via ADC and GCS `gs://` URIs with HTTP 429 retry |
+| **Vertex AI Client** | `scripts/modules/llm_client.py` | Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`) multimodal inference (`thinking_level="low"`, `max_output_tokens=65536`) via ADC and GCS `gs://` URIs |
 | **GCP & Drive Client** | `scripts/modules/gcp_client.py` | GCS SHA-256 cached upload, ephemeral chunk cleanup, 3-Tier Google Drive download, and `static-ffmpeg` PATH helper |
 | **Progress Utility** | `scripts/modules/progress.py` | Live terminal spinner and elapsed timer |
 | **Locale Templates** | `assets/subtitle_proofread_template.{zh-TW,zh-CN,en,ja,ko}.md` | Language-specific Netflix & YouTube segmentation, typography, and proofreading rules |
@@ -41,14 +41,16 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 ## Core Technical Principles
 
 1. **Stage 1 — Global Audio Context & Consistency Glossary (Vertex AI 1M Context Scan, Strict Fail-Fast)**:
-   - Compresses the full episode audio to 48 kbps mono MP3, stages it to `gs://subtitle-craft-${PROJECT_ID}/raw/`, and scans the entire recording with **Gemini 3.8 Flash** to build `<BASENAME>_glossary.md` and a compact ASR bias prompt ($\le 145$ chars).
-   - Optionally merges user-provided outlines (`--outline`) and reference manuscripts (`--script`). Terminates immediately with exit code `1` if GCS staging or Vertex AI inference fails.
+   - Compresses full episode audio to 48 kbps mono MP3 and stages it to `gs://subtitle-craft-${PROJECT_ID}/raw/`.
+   - Scans the entire recording with **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** on a unified `1M` token context window with `thinking_level="low"` and a `65,536` output token limit (`max_output_tokens=65536`) so combined thinking and glossary output never truncate.
+   - Builds `<BASENAME>_glossary.md` and a compact ASR bias prompt ($\le 145$ chars). Optionally merges user outlines (`--outline`) and scripts (`--script`). Terminates immediately with exit code `1` if GCS staging or Vertex AI inference fails.
 2. **Stage 2 — Dual-Engine Zero-Drift Acoustic Ground Truth (Default: `chirp3`; Optional: `whisper`)**:
-   - **Default Engine (`--asr-engine chirp3`)**: Runs Google Cloud Speech-to-Text V2 **`chirp_3`** (`STT_LOCATION=us`, `enableWordTimeOffsets=True`) with silence-aware chunking for long media, OpenCC-grade Traditional Chinese script normalization for `zh-TW`, and immediate `finally`-block cleanup of staged `gs://<BUCKET>/raw/chirp3_asr_*/` audio.
-   - **Optional Engine (`--asr-engine whisper`)**: Runs local `mlx-whisper` (Apple Silicon Metal GPU) or `faster-whisper` (`int8` CPU/CUDA) with `--whisper-model small` by default, biased with the Stage 1 `initial_prompt`. Activate **ONLY** when the user explicitly requests Whisper or local ASR in their prompt.
-   - **Engine-Tagged Cache**: Caches `<BASENAME>_raw_whisper.srt` and `<BASENAME>_words.json` (recording `"asr_engine"`) in `<OUTPUT_DIR>` (`<input_dir>/output/` by default). Switching between `chirp3` and `whisper` automatically refreshes Stage 2 while reusing Stage 1 `_glossary.md`.
+   - **Default Engine (`--asr-engine chirp3`)**: Runs Google Cloud Speech-to-Text V2 **`chirp_3`** (`STT_LOCATION=us`, `enableWordTimeOffsets=True`) with silence-aware chunking for long media, Traditional Chinese script normalization for `zh-TW`, and immediate `finally`-block cleanup of staged `gs://<BUCKET>/raw/chirp3_asr_*/` audio.
+   - **Optional Engine (`--asr-engine whisper`)**: Runs local `mlx-whisper` (Apple Silicon Metal GPU) or `faster-whisper` (`int8` CPU/CUDA) with `--whisper-model small` by default, biased with the Stage 1 `initial_prompt`. Activate **ONLY** when the user explicitly requests Whisper or local ASR in the prompt.
+   - **Engine-Tagged Cache**: Caches `<BASENAME>_raw_whisper.srt` and `<BASENAME>_words.json` (recording `"asr_engine"`) in `<OUTPUT_DIR>` (`<input_dir>/output/` by default). Switching between `chirp3` and `whisper` refreshes Stage 2 automatically while reusing Stage 1 `_glossary.md`.
 3. **Stage 3 — Silence-Aware Multimodal Proofreading & Resilient Non-Cascading Acoustic Re-Projection**:
-   - Splits raw SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$), slices the corresponding audio chunks, stages them to `gs://<BUCKET>/raw/audio_chunks/`, and proofreads homophones, terminology, and clause boundaries in parallel (canceling pending futures and exiting with code `1` on any cloud failure).
+   - Splits raw SRT blocks at natural speech pauses ($\text{gap} \ge 0.4\text{s}$), slices the corresponding audio chunks, and stages them to `gs://<BUCKET>/raw/audio_chunks/`.
+   - Proofreads homophones, terminology, and clause boundaries in parallel with **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** on a unified `1M` token context window with `thinking_level="low"` and a `65,536` output token limit (`max_output_tokens=65536`) so combined thinking and SRT output never truncate. Cancels pending workers and exits with code `1` on any cloud failure.
    - Deletes remote audio chunks in `finally` blocks immediately after each chunk finishes.
    - Normalizes spoken numerals, decimals (`.`), percentages (`%`), currencies (`$`), and thousand separators (`,`) across CJK, Korean, and English while clamping inflated post-silence word onsets (`_clamp_inflated_word_onset`).
    - Re-projects proofread subtitle lines onto physical character timestamps (`realign_subtitles_to_words`) using chunk-level global `difflib` milestone seeding, an **elastic bidirectional search window** (`cur_char_idx - 15` lookback), **neighbor-anchor bounded interpolation** onto unconsumed characters, and **`source_bounds` enclosure** so a single mismatched line never cascades.
@@ -64,7 +66,7 @@ Standalone end-to-end toolkit for generating millisecond-accurate, terminology-v
 Resolve `<PLUGIN_ROOT>` as two directory levels above `skills/subtitle-craft/SKILL.md` (`../../`, e.g., `~/.gemini/config/plugins/subtitle-craft` or the repository root).
 
 ### Step 1: Environment & Cloud Auth Verification
-Verify that Python dependencies (`requirements.txt`, including `static-ffmpeg` or system FFmpeg), `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `pip install -r requirements.txt`, `./setup.sh --project YOUR_PROJECT_ID`, or `gcloud auth application-default login`.
+Verify that Python dependencies (`requirements.txt`, including `static-ffmpeg` or system FFmpeg), `gcloud` ADC credentials, and `.env` configuration (`GOOGLE_CLOUD_PROJECT`, `SUBTITLE_CRAFT_BUCKET` / `GCS_BUCKET`, `STT_LOCATION`, `TRANSCRIBE_MODEL=chirp_3`, `SUMMARY_MODEL=gemini-4-hydrogen`) are ready in `<PLUGIN_ROOT>`. If missing, instruct the user to run `pip install -r requirements.txt`, `./setup.sh --project YOUR_PROJECT_ID`, or `gcloud auth application-default login`.
 
 ### Step 2: Execute the 3-Stage Subtitle Pipeline
 Set `Cwd` to `<PLUGIN_ROOT>` and run `skills/subtitle-craft/scripts/generate_subtitles.py` directly via `run_command` (when `-o` is omitted, all outputs are automatically isolated in `<input_dir>/output/`).
@@ -119,7 +121,7 @@ python3 skills/subtitle-craft/scripts/generate_subtitles.py \
 | `--asr-engine` | `chirp3` | Stage 2 word-timestamp ASR engine (`chirp3` or `whisper`) |
 | `--stt-location` | `us` | Cloud Speech-to-Text V2 multi-region when `--asr-engine=chirp3` (`STT_LOCATION`) |
 | `--whisper-model` | `small` | Whisper model size when `--asr-engine=whisper` (`tiny`, `base`, `small`, `medium`, `large-v3`) |
-| `--model` | `gemini-3.8-flash` | Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (`SUMMARY_MODEL`) |
+| `--model` | `gemini-4-hydrogen` | Vertex AI Gemini model for Stage 1 and Stage 3 proofreading (`SUMMARY_MODEL`) |
 | `--device` | `auto` | Device acceleration backend when `--asr-engine=whisper` (`auto`, `mps`, `mlx`, `cuda`, `cpu`) |
 | `--chunk-size` | `80` | Subtitle entries per proofread batch |
 | `--workers` | `5` | Concurrent workers for parallel proofreading |

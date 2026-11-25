@@ -1,12 +1,17 @@
 # Subtitle Craft — 影視級 AI 智慧字幕生成與校對套件
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.0+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Cloud STT v2 Chirp 3](https://img.shields.io/badge/Cloud%20STT%20v2-Chirp%203-orange.svg)](https://cloud.google.com/speech-to-text)
+[![Gemini 4 Hydrogen](https://img.shields.io/badge/Gemini%204-Hydrogen-yellow.svg)](https://cloud.google.com/vertex-ai)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ---
 
 > [!IMPORTANT]
 > **Google Antigravity 原生技能與工作流套件**  
-> 本工具組為 **Google Antigravity** 打造的獨立三階段 YouTube / Netflix 字幕生成與品質審核套件，結合 **Vertex AI Gemini 3.8 Flash** 與雙聲學時間軸引擎（預設：**Google Cloud Speech-to-Text V2 `Chirp 3`**；選用：**本機 `Whisper`**）。
+> 本工具組為 **Google Antigravity** 打造的獨立三階段 YouTube / Netflix 字幕生成與品質審核套件，結合 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** 與雙聲學時間軸引擎（預設：**Google Cloud Speech-to-Text V2 `Chirp 3`**；選用：**本機 `Whisper`**）。
 
 ---
 
@@ -16,7 +21,7 @@
 
 ## 安裝與 Google Cloud 環境設定 (`setup.sh`)
 
-本專案符合 [Agent Plugins 1.0](https://agent-plugins.org/) 規範，透過 **Google Cloud Application Default Credentials (ADC)** 存取 **Vertex AI**、**Cloud Speech-to-Text V2 (`chirp_3`)** 與 **Cloud Storage (GCS)**，無需管理 API Key。
+本專案符合 [Agent Plugins 1.0](https://agent-plugins.org/) 規範，透過 **Google Cloud Application Default Credentials (ADC)** 存取 **Vertex AI (`SUMMARY_MODEL=gemini-4-hydrogen`)**、**Cloud Speech-to-Text V2 (`TRANSCRIBE_MODEL=chirp_3`)** 與 **Cloud Storage (GCS)**，無需管理 API Key。
 
 ### 1. 安裝 Antigravity Plugin
 
@@ -26,16 +31,16 @@ agy plugin install https://github.com/sylphlin/subtitle-craft
 
 ### 2. 安裝相依套件與配置雲端環境 (`setup.sh`)
 
-`requirements.txt` 已內含 `static-ffmpeg`：當本機未安裝 FFmpeg 時會自動提供跨平台 `ffmpeg` 與 `ffprobe` 執行檔；若本機已具備系統原生 FFmpeg，則優先沿用既有環境與硬體加速。
+`requirements.txt` 內含 `static-ffmpeg`。若本機未安裝 FFmpeg，會自動提供跨平台 `ffmpeg` 與 `ffprobe` 執行檔；若已具備系統原生 FFmpeg，則優先沿用既有環境與硬體加速。
 
 ```bash
-# 1. 安裝 Python 與媒體相依套件（支援預設 Cloud Chirp 3、Gemini 與本機選用 Whisper）
+# 1. 安裝 Python 與媒體相依套件（支援預設 Cloud Chirp 3、Gemini 4 Hydrogen 與本機選用 Whisper）
 pip install -r ~/.gemini/config/plugins/subtitle-craft/requirements.txt
 
 # 2. 授權 Google Cloud ADC 憑證
 gcloud auth application-default login
 
-# 3. 執行 setup.sh 自動啟用 Vertex AI 與 Speech-to-Text V2 API、配置 GCS 儲存桶、雙層生命週期、IAM 與 .env
+# 3. 執行 setup.sh 自動啟用 API、配置 GCS 儲存桶、雙層生命週期、IAM 與 .env（TRANSCRIBE_MODEL=chirp_3、SUMMARY_MODEL=gemini-4-hydrogen）
 cd ~/.gemini/config/plugins/subtitle-craft
 chmod +x setup.sh
 ./setup.sh --project YOUR_GCP_PROJECT_ID
@@ -57,14 +62,14 @@ subtitle-craft/
 │       ├── SKILL.md                                # 技能規範與三階段執行手冊
 │       ├── scripts/                                # 核心腳本與模組目錄 (SSOT)
 │       │   ├── generate_subtitles.py               # 三階段字幕管線與 8 維度品質審核主程式
-│       │   └── modules/                            # Chirp 3 (chirp3_asr)、Vertex AI (llm_client)、GCS/Drive (gcp_client) 與進度模組
+│       │   └── modules/                            # Chirp 3 (chirp3_asr)、Gemini 4 Hydrogen (llm_client)、GCS/Drive (gcp_client) 與進度模組
 │       └── assets/                                 # 多語系字幕校對提示詞範本目錄 (SSOT)
 │           └── subtitle_proofread_template.*.md    # 支援 zh-TW, zh-CN, en, ja, ko 之 YouTube/Netflix 斷句規範
 ├── setup.sh                                        # 原生 gcloud 雲端環境一鍵配置腳本
 ├── pyproject.toml                                  # Python 套件定義與選用相依設定
 ├── requirements.txt                                # 核心執行期相依套件清單
 ├── .env.example                                    # Vertex AI、Cloud STT V2 與 GCS 環境變數範本
-└── tests/                                          # 離線單元測試套件
+└── tests/                                          # 離線單元測試套件（32 項測試）
 ```
 
 ---
@@ -87,7 +92,7 @@ flowchart TD
 
     subgraph Stage1["Stage 1: 全域音訊掃描與詞彙表"]
         S0["FFmpeg 音訊提取<br/>(16 kHz 單聲道 WAV & 48 kbps MP3)"]:::stage1Style
-        S1["Vertex AI Gemini 3.8 Flash<br/>(1M Context 全片音訊掃描)"]:::stage1Style
+        S1["Vertex AI Gemini 4 Hydrogen<br/>(1M Context 全片音訊掃描)"]:::stage1Style
         GL["中繼產物: <basename>_glossary.md<br/>+ 語音辨識引導詞"]:::artifactStyle
     end
 
@@ -97,7 +102,7 @@ flowchart TD
     end
 
     subgraph Stage3["Stage 3: 多模態音訊校對與時間重投影"]
-        S3_1["3.1 靜音感知分塊與多模態音訊校對<br/>(Vertex AI Gemini 3.8 Flash + GCS 音訊切片)"]:::stage3Style
+        S3_1["3.1 靜音感知分塊與多模態音訊校對<br/>(Vertex AI Gemini 4 Hydrogen + GCS 音訊切片)"]:::stage3Style
         S3_2["3.2 物理字詞邊界時間重投影與節奏淨化<br/>(realign_subtitles_to_words + sanitize_subtitle_timings)"]:::stage3Style
         S3_3["3.3 8 維度串流品質審核<br/>(字數上限、閱讀語速 CPS、標點與重疊檢查)"]:::stage3Style
     end
@@ -140,7 +145,7 @@ Stage 2 支援兩種逐字聲學時間軸引擎。使用者無需記憶或輸入
 2. **自然語言描述**：直接以口語描述需求並附上 `@` 檔案或 Google Drive 連結。
 
 ### 情境 1：標準影視級字幕生成（自動使用預設 Cloud Chirp 3）
-- **適用場景**：使用預設雲端 Chirp 3 擷取逐字時間軸，並由 Gemini 3.8 Flash 校對同音字與技術專有名詞。
+- **適用場景**：使用預設雲端 Chirp 3 擷取逐字時間軸，並由 Gemini 4 Hydrogen 校對同音字與技術專有名詞。
 - **方式 A（`/ + @` 極簡指令）**：
   ```text
   /subtitle-craft 檔案: @final_cut.mp4
@@ -201,13 +206,13 @@ Stage 2 支援兩種逐字聲學時間軸引擎。使用者無需記憶或輸入
 ## 三階段核心技術說明
 
 - **輸出目錄自動隔離（`<input_dir>/output/`）**：系統預設將所有最終與中繼產物（`.srt`、`.vtt`、`_glossary.md`、`_raw_whisper.srt`、`_words.json`、`_subtitle_report.md`、`_subtitle_report.json`）收納於 `<input_dir>/output/` 子目錄；若輸入檔案已位於 `output/` 目錄下則直接重用，避免產生 `output/output/` 巢狀目錄。
-1. **Stage 1（全域音訊掃描與詞彙表提取 — 嚴格 Fail-Fast）**：壓縮全片音訊並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 3.8 Flash**（`1M` Context）產出 `<basename>_glossary.md` 與對應語系的語音辨識引導詞（$\le 145$ 字元）。若發生雲端權限或連線錯誤，立即以狀態碼 `1` 終止並輸出修復步驟。
+1. **Stage 1（全域音訊掃描與詞彙表提取 — 嚴格 Fail-Fast）**：壓縮全片音訊並上傳至 `gs://subtitle-craft-${PROJECT_ID}/raw/`，透過 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)** 於統一 `1M` Token 脈絡視窗下執行全片掃描（配置 `thinking_level="low"` 與 `65,536` 輸出 Token 上限 `max_output_tokens=65536`，確保思考過程與詞彙表輸出絕不截斷），產出 `<basename>_glossary.md` 與對應語系的語音辨識引導詞（$\le 145$ 字元）。若發生雲端權限或連線錯誤，立即以狀態碼 `1` 終止並輸出修復步驟。
 2. **Stage 2（雙引擎毫秒級逐字聲學時間戳 — 預設 `Chirp 3`、選用 `Whisper`）**：
    - **預設雲端 `Chirp 3`**：呼叫 Google Cloud Speech-to-Text V2 `chirp_3`（`STT_LOCATION=us`、`enableWordTimeOffsets=True`），支援長音訊靜音感知分段、繁體中文字體正規化，並於推論後立即清理暫存音訊。
    - **選用本機 `Whisper`**：使用者於提示詞指定時，啟動 `mlx-whisper` 或 `faster-whisper`（預設 `small` 模型，`word_timestamps=True`）。
    - **引擎標記快取**：將字詞時間戳與所屬引擎名稱寫入 `<basename>_words.json`；切換聲學引擎時會自動重跑 Stage 2 並直接重用 Stage 1 詞彙表。
 3. **Stage 3（靜音感知分塊、防漂移聲學重投影與 `agent_verdict` 品質閘門）**：
-   - 於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，比對音訊切片與全域詞彙表修正同音字（雲端錯誤立即取消佇列並以狀態碼 `1` 終止）。
+   - **多模態聽覺分塊校對（嚴格 Fail-Fast）**：於自然換氣停頓處（$\ge 0.4\text{s}$）切分區塊，上傳音訊切片至 `gs://<bucket>/raw/audio_chunks/`，透過 **Vertex AI Gemini 4 Hydrogen (`gemini-4-hydrogen`)**（統一 `1M` Token 脈絡視窗、`thinking_level="low"`、`max_output_tokens=65536` 輸出上限，確保思考與 SRT 字幕輸出不截斷）比對音訊與全域詞彙表修正同音字；完成後於 `finally` 區塊刪除遠端切片，遇雲端錯誤立即取消佇列並以狀態碼 `1` 終止。
    - **多階段防漂移聲學重投影（`realign_subtitles_to_words`）與均衡斷句（`sanitize_subtitle_timings`）**：
      - **多語系口語數詞正規化與停頓後首字收斂**：支援中、日、韓、英口語數字、小數點（`.`）、百分比（`%`）、貨幣（`$`）與千分位（`,`）雙向正規化對齊，並收斂停頓後異常拉長的首字起點（`_clamp_inflated_word_onset`）。
      - **全域里程碑錨定與雙向鄰居有界內插**：以區塊級 `difflib` 全域匹配里程碑引導搜尋視窗（`cur_char_idx - 15` 回溯），將未鎖定行按字數比例內插至前後鎖定行之間尚未消耗的字元時間軸，消除連鎖時間漂移。
